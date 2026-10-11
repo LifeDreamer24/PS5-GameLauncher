@@ -339,7 +339,7 @@ export class HomeView {
     if (tab === this.tab) return;
     this.selByTab[this.tab] = this.items[this.sel]?.key;
     this.tab = tab;
-    sfx.select();
+    sfx.tab();
     this.syncMediaWatch();
     if (tab === 'media' && !sys.media) pollMedia();
     this.carousel.classList.add('switching');

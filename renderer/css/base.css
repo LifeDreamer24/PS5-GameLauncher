@@ -1,3 +1,34 @@
+@font-face {
+  font-family: "SST";
+  src: url("../fonts/sst/SSTLight.TTF") format("truetype");
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: "SST";
+  src: url("../fonts/sst/SSTRg.TTF") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "SST";
+  src: url("../fonts/sst/SSTMedium.TTF") format("truetype");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "SST";
+  src: url("../fonts/sst/SSTBold.TTF") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "SST";
+  src: url("../fonts/sst/SSTHeavy.TTF") format("truetype");
+  font-weight: 800;
+  font-display: swap;
+}
+
 /* ------------------------------------------------------------------ */
 /* Tokens                                                              */
 /* ------------------------------------------------------------------ */
@@ -650,4 +681,65 @@ html.windowed .boot {
 
 .ps-slider.no-knob .pss-track i {
   width: calc(100% * var(--p));
+}
+
+/* ------------------------------------------------------------------ */
+/* List move wave (FocusList): a curved band of light sweeps across the  */
+/* newly selected row, downwards or upwards with the move.               */
+/* ------------------------------------------------------------------ */
+.fx-wave {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.fx-wave::before {
+  content: "";
+  position: absolute;
+  left: -15%;
+  right: -15%;
+  height: 160%;
+  top: -160%;
+  opacity: 0;
+  /* the lower edge of a wide ellipse: a soft, slightly curved arc of light */
+  background: radial-gradient(60% 50% at 50% 0%, transparent 62%, rgba(255, 255, 255, 0.3) 76%, rgba(255, 255, 255, 0.1) 86%, transparent 94%);
+  filter: blur(0.4rem);
+}
+
+.fx-wave.up::before {
+  background: radial-gradient(60% 50% at 50% 100%, transparent 62%, rgba(255, 255, 255, 0.3) 76%, rgba(255, 255, 255, 0.1) 86%, transparent 94%);
+}
+
+.fx-wave.run.down::before {
+  animation: fxWaveDown 0.22s cubic-bezier(0.3, 0.5, 0.4, 1) both;
+}
+
+.fx-wave.run.up::before {
+  animation: fxWaveUp 0.22s cubic-bezier(0.3, 0.5, 0.4, 1) both;
+}
+
+@keyframes fxWaveDown {
+  0% { top: -150%; opacity: 0; }
+  12% { opacity: 1; }
+  65% { opacity: 0.85; }
+  100% { top: 40%; opacity: 0; }
+}
+
+@keyframes fxWaveUp {
+  0% { top: 90%; opacity: 0; }
+  12% { opacity: 1; }
+  65% { opacity: 0.85; }
+  100% { top: -100%; opacity: 0; }
+}
+
+.reduce-motion .fx-wave {
+  display: none;
+}
+
+/* Settings › System › Language and Font: the PlayStation (SST) typeface */
+html.font-sst {
+  --font: "SST", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }

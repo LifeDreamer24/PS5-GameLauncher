@@ -32,6 +32,8 @@ export class SettingsView {
     on('gamepad', rerender);
     on('volume', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
     on('outputs', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
+    on('soundpacks', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
+    on('passthrough', () => this.active && this.cat && this.cat.id === 'system' && rerender());
     on('brightness', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('nightlight', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('bluetooth', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());
@@ -337,7 +339,7 @@ export class SettingsView {
     const s = state.settings;
     switch (d.type) {
       case 'toggle':
-        sfx.toggle();
+        sfx.toggle(!(d.get ? d.get() : s[d.key]));
         if (d.set) await d.set(!d.get());
         else await setSetting(d.key, !s[d.key]);
         this.renderList(true);

@@ -4,11 +4,12 @@
 
 import { state, on, loadState, api } from './state.js';
 import { setHandler, setGamepadPolling, externalAction } from './input.js';
-import { configureSound, unlockAudio } from './sound.js';
+import { configureSound, unlockAudio, setSoundPacks } from './sound.js';
 import { topOverlay } from './ui/overlay.js';
 import { QuickMenu } from './views/quickmenu.js';
 import { loadDiscord } from './discord.js';
 import { setLanguage, language } from './i18n.js';
+import { toast } from './ui/toast.js';
 
 const router = {
   home: (params) => api.overlayNavigate({ view: 'home', params }),
@@ -16,11 +17,19 @@ const router = {
   openSearch: () => api.overlayNavigate({ view: 'search' }),
 };
 
+let packsKey = null;
+
 function applySettings() {
   const s = state.settings;
   document.documentElement.style.setProperty('--ui-scale', String((s.uiScale || 100) / 100));
   document.body.classList.toggle('reduce-motion', !!s.reduceMotion);
+  document.documentElement.classList.toggle('font-sst', s.font === 'sst');
   configureSound(s);
+  const key = `${s.soundPack || ''}|${s.musicPack || ''}`;
+  if (key !== packsKey) {
+    packsKey = key;
+    api.soundPacks().then((list) => setSoundPacks(list, s.soundPack, null)).catch(() => {});
+  }
   updateClock();
 }
 
@@ -65,6 +74,7 @@ async function main() {
     if (!quick.ctl) quick.open();
     updateClock();
   });
+  api.on('overlay:toast', (n) => toast({ ...n, sound: true }));
   api.on('overlay:close', () => {
     if (quick.ctl) quick.close();
     else api.overlayClosed();

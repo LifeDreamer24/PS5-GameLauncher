@@ -5,14 +5,20 @@
 // Discord Developer Portal and enters its Application ID + Client Secret
 // once; Discord then shows an "Authorize" prompt and we keep the token
 // (encrypted with Windows DPAPI via Electron's safeStorage).
+//
+// Messages: with rpc.notifications.read Discord reports every notification
+// (DMs, mentions); with messages.read the launcher can load a channel's
+// recent messages and follow new ones. Discord's local RPC has no way to send
+// messages, so replying opens the conversation in Discord itself.
 
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
-const { safeStorage } = require('electron');
+const { safeStorage, shell } = require('electron');
 
 const OP = { HANDSHAKE: 0, FRAME: 1, CLOSE: 2, PING: 3, PONG: 4 };
-const SCOPES = ['rpc', 'rpc.voice.read', 'rpc.voice.write'];
+const SCOPES = ['rpc', 'rpc.voice.read', 'rpc.voice.write', 'rpc.notifications.read', 'messages.read'];
+const MESSAGE_SCOPES = ['rpc.notifications.read', 'messages.read'];
 const REDIRECT_URI = 'http://localhost';
 const TOKEN_URL = 'https://discord.com/api/oauth2/token';
 
@@ -38,6 +44,8 @@ class DiscordBridge {
       error: null,
       user: null,
       voice: null, // { mute, deaf, input, output }
+      messages: false, // Discord allowed message notifications / reading
+      conversations: [], // recent conversations seen this session: { channelId, name, icon, last, time, unread }
       channel: null, // { id, name, guild }
       members: [], // [{ id, name, avatar, mute, deaf, speaking, volume, self }]
     };
@@ -300,8 +308,15 @@ class DiscordBridge {
     this.retryTimer = setTimeout(() => this.connect({ interactive: false }), 15000);
   }
 
+  /** Authorized before messages were supported: Discord has to ask once more. */
+  needsMessageScopes() {
+    const have = this.creds.scopes || [];
+    return !MESSAGE_SCOPES.every((s) => have.includes(s));
+  }
+
   async authenticate(interactive) {
     let token = this.open(this.creds.access);
+    if (interactive && this.needsMessageScopes()) token = null;
     if (token && this.creds.expires && Date.now() > this.creds.expires - 60000) token = await this.refreshToken();
     if (token) {
       try {
@@ -356,6 +371,7 @@ class DiscordBridge {
     this.creds.access = this.seal(r.json.access_token);
     if (r.json.refresh_token) this.creds.refresh = this.seal(r.json.refresh_token);
     this.creds.expires = Date.now() + (r.json.expires_in || 604800) * 1000;
+    if (r.json.scope) this.creds.scopes = String(r.json.scope).split(/\s+/);
     this.saveCreds();
     this.state.authorized = true;
     return r.json.access_token;
@@ -387,6 +403,16 @@ class DiscordBridge {
     for (const evt of ['VOICE_SETTINGS_UPDATE', 'VOICE_CHANNEL_SELECT', 'VOICE_CONNECTION_STATUS']) {
       this.request('SUBSCRIBE', {}, { evt }).catch(() => {});
     }
+    this.state.messages = false;
+    this.request('SUBSCRIBE', {}, { evt: 'NOTIFICATION_CREATE' })
+      .then(() => {
+        this.state.messages = true;
+        this.push();
+      })
+      .catch(() => {
+        this.state.messages = false;
+        this.push();
+      });
     try {
       this.applyVoiceSettings(await this.request('GET_VOICE_SETTINGS'));
     } catch {}
@@ -495,6 +521,12 @@ class DiscordBridge {
         this.push();
         break;
       }
+      case 'NOTIFICATION_CREATE':
+        this.onNotification(data);
+        break;
+      case 'MESSAGE_CREATE':
+        if (data.channel_id === this.chatChannel && data.message) this.send('discord:chat', { channelId: data.channel_id, message: this.describeMessage(data.message) });
+        break;
       case 'SPEAKING_START':
       case 'SPEAKING_STOP': {
         const m = this.state.members.find((x) => x.id === data.user_id);
@@ -505,6 +537,79 @@ class DiscordBridge {
         break;
       }
     }
+  }
+
+  /* -------------------------------------------------------------- */
+  /* Messages                                                       */
+  /* -------------------------------------------------------------- */
+
+  avatarUrl(u) {
+    if (!u || !u.id) return null;
+    return u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=128` : null;
+  }
+
+  describeMessage(m) {
+    const a = m.author || {};
+    const att = (m.attachments || []).length;
+    const emb = (m.embeds || []).length;
+    let content = String(m.content || '');
+    if (!content && att) content = att === 1 ? '[attachment]' : `[${att} attachments]`;
+    else if (!content && emb) content = '[embed]';
+    return {
+      id: m.id,
+      author: a.global_name || a.nick || m.nick || a.username || 'Unknown',
+      authorId: a.id || null,
+      avatar: this.avatarUrl(a),
+      self: !!(this.state.user && a.id === this.state.user.id),
+      content,
+      time: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
+    };
+  }
+
+  onNotification(d) {
+    const channelId = d.channel_id;
+    if (!channelId) return;
+    const msg = d.message ? this.describeMessage(d.message) : null;
+    if (msg && msg.self) return;
+    const name = d.title || (msg && msg.author) || 'Discord';
+    const icon = d.icon_url || (msg && msg.avatar) || null;
+    const list = this.state.conversations.filter((c) => c.channelId !== channelId);
+    const prev = this.state.conversations.find((c) => c.channelId === channelId);
+    list.unshift({ channelId, name, icon, last: d.body || (msg && msg.content) || '', time: Date.now(), unread: (prev ? prev.unread : 0) + 1 });
+    this.state.conversations = list.slice(0, 12);
+    this.push();
+    this.send('discord:message', { channelId, title: name, body: d.body || (msg && msg.content) || '', icon });
+  }
+
+  /** Recent messages of a channel; new ones follow as discord:chat events. */
+  async openChat(channelId) {
+    const id = String(channelId || '');
+    if (!/^\d+$/.test(id)) throw new Error('Unknown conversation');
+    if (this.chatChannel && this.chatChannel !== id) this.request('UNSUBSCRIBE', { channel_id: this.chatChannel }, { evt: 'MESSAGE_CREATE' }).catch(() => {});
+    this.chatChannel = id;
+    const ch = await this.request('GET_CHANNEL', { channel_id: id });
+    this.request('SUBSCRIBE', { channel_id: id }, { evt: 'MESSAGE_CREATE' }).catch(() => {});
+    const conv = this.state.conversations.find((c) => c.channelId === id);
+    if (conv) {
+      conv.unread = 0;
+      this.push();
+    }
+    const messages = (ch.messages || []).map((m) => this.describeMessage(m)).sort((a, b) => a.time - b.time);
+    return { channelId: id, guildId: ch.guild_id || null, name: ch.name || (conv && conv.name) || 'Discord', messages };
+  }
+
+  closeChat() {
+    if (this.chatChannel) this.request('UNSUBSCRIBE', { channel_id: this.chatChannel }, { evt: 'MESSAGE_CREATE' }).catch(() => {});
+    this.chatChannel = null;
+  }
+
+  /** Open the conversation in Discord (where replies are written). */
+  openInDiscord(channelId, guildId) {
+    const id = String(channelId || '');
+    if (!/^\d+$/.test(id)) return false;
+    const g = guildId && /^\d+$/.test(String(guildId)) ? String(guildId) : '@me';
+    shell.openExternal(`discord://-/channels/${g}/${id}`);
+    return true;
   }
 
   /* -------------------------------------------------------------- */

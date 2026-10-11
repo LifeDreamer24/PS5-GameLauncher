@@ -245,9 +245,9 @@ export function sliderDialog({ title, value, min = 0, max = 100, step = 5, unit 
     const set = (nv, quiet) => {
       nv = clamp(Math.round(nv / step) * step, min, max);
       if (nv === v) return quiet ? null : sfx.bump();
+      sfx.slider(nv > v);
       v = nv;
       render();
-      sfx.tick();
       onChange && onChange(v);
     };
     dragSlider(track.firstElementChild, (p) => set(min + (p / 100) * (max - min), true));

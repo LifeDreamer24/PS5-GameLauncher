@@ -54,7 +54,7 @@ namespace PS5GameLauncher
         static void Main()
         {
             AppDomain.CurrentDomain.UnhandledException += (s, e) => GameWin.ResumeAll();
-            AppDomain.CurrentDomain.ProcessExit += (s, e) => GameWin.ResumeAll();
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => { GameWin.ResumeAll(); Passthrough.Disable(); };
             stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
             var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
             stdout.WriteLine("{\"ready\":true}");
@@ -67,6 +67,7 @@ namespace PS5GameLauncher
                 ThreadPool.QueueUserWorkItem(_ => Process(copy));
             }
             BtScan.Stop();
+            Passthrough.Disable();
             GameWin.ResumeAll();
         }
 
@@ -148,6 +149,7 @@ namespace PS5GameLauncher
             {
                 case "ping": return "pong";
                 case "media": return Media.State(Str(req, "app"), Bool(req, "art"));
+                case "mediaPlaying": return Media.AnyPlaying();
                 case "mediaCmd": return Media.Command(Str(req, "app"), Str(req, "action"), Int(req, "value", 0));
                 case "volume": return new Dictionary<string, object> { { "volume", Audio.GetVolume() }, { "muted", Audio.GetMute() } };
                 case "setVolume": Audio.SetVolume(Int(req, "value", 50)); return true;
@@ -175,6 +177,12 @@ namespace PS5GameLauncher
                 case "dirWindows": return Fg.DirWindows(req.ContainsKey("dirs") ? ((System.Collections.ArrayList)req["dirs"]).Cast<object>().Select(o => Convert.ToString(o)).ToList() : new List<string>());
                 case "padForward": Pad.Forward = Bool(req, "value"); return true;
                 case "padInfo": return Pad.Info();
+                case "passthrough":
+                    if (req.ContainsKey("mode")) Passthrough.Configure(Str(req, "mode"));
+                    return Passthrough.Enable(Bool(req, "value"));
+                case "passthroughConfig": return Passthrough.Configure(Str(req, "mode"));
+                case "passthroughMute": return Passthrough.SetMuted(Bool(req, "value"));
+                case "passthroughStatus": return Passthrough.Status();
                 case "launch": return Launch(Str(req, "file"), Str(req, "args"), Str(req, "cwd"));
                 case "windowTitles": return GameWin.Titles(Int(req, "pid", 0));
                 case "focusProc": return GameWin.Focus(Int(req, "pid", 0));
@@ -229,6 +237,22 @@ namespace PS5GameLauncher
         static bool IsPlaying(GlobalSystemMediaTransportControlsSession s)
         {
             return s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        }
+
+        /// <summary>Is another app playing media right now? (The launcher pauses its menu music meanwhile.)</summary>
+        public static bool AnyPlaying()
+        {
+            try
+            {
+                foreach (var s in Manager().GetSessions())
+                {
+                    var id = s.SourceAppUserModelId ?? "";
+                    if (id.IndexOf("electron", StringComparison.OrdinalIgnoreCase) >= 0 || id.IndexOf("PS5 Game Launcher", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (IsPlaying(s)) return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         // The requested app if it has a session, else something that is playing
@@ -1189,6 +1213,855 @@ namespace PS5GameLauncher
     //  * DualSense / DualShock 4 through their HID input reports
     // The Guide/PS button is always reported. Other buttons are only reported
     // while the overlay is open (Forward = true).
+    /* ------------------------------------------------------------------ */
+    /* Controller passthrough (HidHide + VIIPER)                           */
+    /* ------------------------------------------------------------------ */
+
+    /// <summary>
+    /// Games never see the real PlayStation controller: HidHide hides it from
+    /// every program except this helper, and a virtual DualSense made by VIIPER
+    /// (usbip-win2) takes its place. The helper forwards the real controller's
+    /// input to the virtual one and the game's rumble / lightbar back. While a
+    /// menu is open the virtual controller gets a "nothing pressed" state, so
+    /// the game can't react to the menu's button presses.
+    /// HidHide's session list is cleared by Windows when this process exits.
+    /// </summary>
+    static class Passthrough
+    {
+        public static volatile bool Enabled;
+        public static volatile bool Muted;
+        static readonly object Gate = new object();
+        static readonly Dictionary<string, Virtual> Pads = new Dictionary<string, Virtual>();
+        static readonly HashSet<string> Hidden = new HashSet<string>();
+        static string hidhide = "unknown"; // ok | missing | denied | error
+        static string viiper = "unknown"; // ok | missing | error
+        static string lastError = null;
+        static bool restoreInactive;
+        static bool inverse;
+        static List<string> allowed = new List<string>(); // other programs HidHide lets see hidden controllers
+        static int busId = -1;
+
+        /* ---------------- HidHide ---------------- */
+
+        [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr sec, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32", SetLastError = true)]
+        static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle h, uint code, byte[] inBuf, int inLen, byte[] outBuf, int outLen, out int returned, IntPtr overlapped);
+        [DllImport("kernel32", CharSet = CharSet.Unicode)]
+        static extern uint QueryDosDevice(string device, StringBuilder target, int max);
+
+        static uint Ioctl(int fn) { return (32769u << 16) | (1u << 14) | ((uint)fn << 2); }
+        const int GET_WHITELIST = 2048, SET_WHITELIST = 2049, GET_BLACKLIST = 2050, SET_BLACKLIST = 2051, GET_ACTIVE = 2052, SET_ACTIVE = 2053, GET_WLINVERSE = 2054, ADD_SESSION = 2056, CLR_SESSION = 2057;
+        static Microsoft.Win32.SafeHandles.SafeFileHandle control;
+
+        static bool OpenHidHide()
+        {
+            if (control != null && !control.IsInvalid) return true;
+            control = CreateFile("\\\\.\\HidHide", 0x80000000, 0x1 | 0x2 | 0x4, IntPtr.Zero, 3, 0, IntPtr.Zero);
+            if (!control.IsInvalid) return true;
+            var err = Marshal.GetLastWin32Error();
+            hidhide = err == 5 ? "denied" : err == 2 ? "missing" : "error";
+            control = null;
+            return false;
+        }
+
+/// <summary>Send a request; input may be null (requests without data).</summary>
+        static void Put(int fn, byte[] input)
+        {
+            int got;
+            if (!DeviceIoControl(control, Ioctl(fn), input, input == null ? 0 : input.Length, null, 0, out got, IntPtr.Zero)) throw Fail(fn);
+        }
+
+        /// <summary>An on/off value: HidHide wants a buffer of exactly one byte.</summary>
+        static bool GetFlag(int fn)
+        {
+            int got;
+            var b = new byte[1];
+            if (!DeviceIoControl(control, Ioctl(fn), null, 0, b, 1, out got, IntPtr.Zero)) throw Fail(fn);
+            return b[0] != 0;
+        }
+
+        /// <summary>A string list: ask for the size first, then read it.</summary>
+        static byte[] GetList(int fn)
+        {
+            int got;
+            if (!DeviceIoControl(control, Ioctl(fn), null, 0, null, 0, out got, IntPtr.Zero)) throw Fail(fn);
+            if (got <= 0) return new byte[0];
+            var buf = new byte[got];
+            if (!DeviceIoControl(control, Ioctl(fn), null, 0, buf, buf.Length, out got, IntPtr.Zero)) throw Fail(fn);
+            return buf.Take(got).ToArray();
+        }
+
+        static Exception Fail(int fn)
+        {
+            var e = new System.ComponentModel.Win32Exception();
+            return new System.ComponentModel.Win32Exception(e.NativeErrorCode, "HidHide " + fn + ": " + e.Message);
+        }
+
+        static List<string> FromMulti(byte[] b)
+        {
+            if (b == null || b.Length < 2) return new List<string>();
+            return Encoding.Unicode.GetString(b).Split('\0').Where(s => s.Length > 0).ToList();
+        }
+
+        static byte[] ToMulti(IEnumerable<string> list)
+        {
+            return Encoding.Unicode.GetBytes(string.Join("\0", list) + "\0\0");
+        }
+
+        /// <summary>"C:\x\y.exe" -> "\Device\HarddiskVolume3\x\y.exe", the form HidHide keeps.</summary>
+        static string FullImageName(string path)
+        {
+            var sb = new StringBuilder(1024);
+            if (path.Length < 2 || QueryDosDevice(path.Substring(0, 2), sb, sb.Capacity) == 0) return null;
+            return sb.ToString() + path.Substring(2);
+        }
+
+        static bool SetupHidHide()
+        {
+            if (!OpenHidHide()) return false;
+            try
+            {
+                inverse = GetFlag(GET_WLINVERSE);
+                var me = FullImageName(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                var wl = FromMulti(GetList(GET_WHITELIST));
+                // Anything else on the list (Steam, for example) still reads the real controller.
+                allowed = wl.Where(x => !string.Equals(x, me, StringComparison.OrdinalIgnoreCase) && !x.EndsWith("\\syshelper.exe", StringComparison.OrdinalIgnoreCase))
+                    .Select(x => x.Substring(x.LastIndexOf('\\') + 1)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                if (me != null && !inverse)
+                {
+                    if (!wl.Any(x => string.Equals(x, me, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        wl.Add(me);
+                        Put(SET_WHITELIST, ToMulti(wl));
+                    }
+                }
+                if (!GetFlag(GET_ACTIVE))
+                {
+                    Put(SET_ACTIVE, new byte[] { 1 });
+                    restoreInactive = true;
+                }
+                hidhide = "ok";
+                return true;
+            }
+            catch (Exception e)
+            {
+                hidhide = e is System.ComponentModel.Win32Exception && ((System.ComponentModel.Win32Exception)e).NativeErrorCode == 5 ? "denied" : "error";
+                lastError = e.Message;
+                return false;
+            }
+        }
+
+        static void Hide(string devicePath)
+        {
+            if (hidhide != "ok") return;
+            var inst = Pad.InstancePath(devicePath);
+            lock (Gate)
+            {
+                if (!Hidden.Add(inst)) return;
+            }
+            // HidHide releases up to 1.5 don't have the session list (2056); use the
+            // normal device list there and remember what we added, so it can be undone.
+            if (!sessionUnsupported)
+            {
+                try { Put(ADD_SESSION, ToMulti(new[] { inst })); }
+                catch { sessionUnsupported = true; }
+            }
+            if (sessionUnsupported)
+            {
+                try { AddToBlacklist(inst); } catch (Exception e) { lastError = e.Message; return; }
+            }
+            // Hiding only stops new opens: games (and Steam) that already have the
+            // controller keep reading it. Restarting the device closes those handles,
+            // like a replug, so from then on they only find the virtual one.
+            new Thread(() => { Thread.Sleep(100); RestartDevice(inst); }) { IsBackground = true, Name = "pad-restart" }.Start();
+        }
+
+        static bool sessionUnsupported;
+
+        /// <summary>Devices we put on HidHide's (permanent) list, so a crash can't leave them hidden.</summary>
+        static string RecordFile
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PS5 Game Launcher", "hidhide-hidden.txt"); }
+        }
+
+        static List<string> Recorded()
+        {
+            try { return File.Exists(RecordFile) ? File.ReadAllLines(RecordFile).Where(l => l.Length > 0).ToList() : new List<string>(); }
+            catch { return new List<string>(); }
+        }
+
+        static void AddToBlacklist(string inst)
+        {
+            var bl = FromMulti(GetList(GET_BLACKLIST));
+            if (bl.Any(x => string.Equals(x, inst, StringComparison.OrdinalIgnoreCase))) return; // already hidden by the user: leave it to them
+            var rec = Recorded();
+            if (!rec.Contains(inst))
+            {
+                rec.Add(inst);
+                Directory.CreateDirectory(Path.GetDirectoryName(RecordFile));
+                File.WriteAllLines(RecordFile, rec);
+            }
+            bl.Add(inst);
+            Put(SET_BLACKLIST, ToMulti(bl));
+        }
+
+        /// <summary>Take back what we added (also the leftovers of a run that crashed).</summary>
+        public static void RemoveRecorded()
+        {
+            var rec = Recorded();
+            if (rec.Count == 0 || !OpenHidHide()) return;
+            try
+            {
+                var bl = FromMulti(GetList(GET_BLACKLIST));
+                var left = bl.Where(x => !rec.Any(r => string.Equals(r, x, StringComparison.OrdinalIgnoreCase))).ToList();
+                if (left.Count != bl.Count) Put(SET_BLACKLIST, ToMulti(left));
+                File.Delete(RecordFile);
+            }
+            catch (Exception e) { lastError = e.Message; }
+        }
+
+        /// <summary>Restart a device (not persistent, like replugging it). Needs admin, as HidHide does.</summary>
+        static void RestartDevice(string instance)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "pnputil.exe"), "/restart-device \"" + instance + "\"")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                Pad.ScanFast(6000);
+                using (var p = System.Diagnostics.Process.Start(psi))
+                {
+                    var output = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(15000);
+                    Pad.ScanFast(6000);
+                    if (p.ExitCode != 0 && p.ExitCode != 3010) lastError = "Couldn't restart the controller (" + output.Trim() + "). Reconnect it once.";
+                }
+            }
+            catch (Exception e) { lastError = "Couldn't restart the controller: " + e.Message + ". Reconnect it once."; }
+        }
+
+        static void UnhideAll()
+        {
+            List<string> was;
+            lock (Gate)
+            {
+                was = Hidden.ToList();
+                Hidden.Clear();
+            }
+            if (control == null) return;
+            if (!sessionUnsupported) try { Put(CLR_SESSION, null); } catch { }
+            RemoveRecorded();
+            // Reconnect them so games pick the real controller up again right away.
+            foreach (var inst in was)
+            {
+                var i = inst;
+                new Thread(() => RestartDevice(i)) { IsBackground = true, Name = "pad-restart" }.Start();
+            }
+            if (restoreInactive)
+            {
+                try { Put(SET_ACTIVE, new byte[] { 0 }); } catch { }
+                restoreInactive = false;
+            }
+        }
+
+        /* ---------------- VIIPER ---------------- */
+
+        const int ApiPort = 3242;
+        static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+
+        static Dictionary<string, object> Api(string request)
+        {
+            using (var c = new System.Net.Sockets.TcpClient())
+            {
+                var ar = c.BeginConnect("127.0.0.1", ApiPort, null, null);
+                if (!ar.AsyncWaitHandle.WaitOne(1500) || !c.Connected) throw new InvalidOperationException("VIIPER isn't running");
+                c.EndConnect(ar);
+                c.ReceiveTimeout = 5000;
+                var s = c.GetStream();
+                var bytes = Encoding.UTF8.GetBytes(request + "\0");
+                s.Write(bytes, 0, bytes.Length);
+                var ms = new MemoryStream();
+                var buf = new byte[4096];
+                int n;
+                while ((n = s.Read(buf, 0, buf.Length)) > 0) ms.Write(buf, 0, n);
+                var text = Encoding.UTF8.GetString(ms.ToArray()).Trim('\0', ' ', '\r', '\n');
+                var obj = text.Length > 0 ? Json.Deserialize<Dictionary<string, object>>(text) : new Dictionary<string, object>();
+                if (obj.ContainsKey("status") && obj.ContainsKey("title")) throw new InvalidOperationException("VIIPER: " + obj["title"] + (obj.ContainsKey("detail") ? " (" + obj["detail"] + ")" : ""));
+                return obj;
+            }
+        }
+
+        static bool SetupViiper()
+        {
+            try
+            {
+                Api("ping");
+                RemoveLeftovers();
+                var created = Api("bus/create");
+                busId = Convert.ToInt32(created["busId"]);
+                viiper = "ok";
+                return true;
+            }
+            catch (Exception e)
+            {
+                viiper = e.Message.Contains("isn't running") ? "missing" : "error";
+                lastError = e.Message;
+                return false;
+            }
+        }
+
+        /// <summary>Buses holding only virtual DualSenses are ours from an earlier run.</summary>
+        static void RemoveLeftovers()
+        {
+            try
+            {
+                var buses = Api("bus/list");
+                if (!buses.ContainsKey("buses") || !(buses["buses"] is System.Collections.IEnumerable)) return;
+                foreach (var b in (System.Collections.IEnumerable)buses["buses"])
+                {
+                    var id = Convert.ToString(b);
+                    var list = Api("bus/" + id + "/list");
+                    var devs = list.ContainsKey("devices") ? list["devices"] as System.Collections.IEnumerable : null;
+                    var ours = true;
+                    if (devs != null)
+                        foreach (var d in devs)
+                        {
+                            var dev = d as Dictionary<string, object>;
+                            var type = dev != null && dev.ContainsKey("type") ? Convert.ToString(dev["type"]) : "";
+                            if (type != "dualsense" && type != "dualsenseedge") ours = false;
+                        }
+                    if (!ours) continue;
+                    if (devs != null)
+                        foreach (var d in devs)
+                        {
+                            var dev = d as Dictionary<string, object>;
+                            if (dev != null && dev.ContainsKey("devId")) try { Api("bus/" + id + "/remove " + dev["devId"]); } catch { }
+                        }
+                    try { Api("bus/remove " + id); } catch { }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>What a DualSense is shown to games as: dualsense | dualshock4 | xbox360.</summary>
+        static string emulation = "dualsense";
+
+        class Virtual
+        {
+            public string Path;      // real DualSense device path
+            public string Kind;      // dualsense | dualsenseedge | dualshock4 | xbox360
+            public string DevId;
+            public System.Net.Sockets.TcpClient Stream;
+            public bool Bluetooth;
+            public byte[] Last = new byte[33]; // last DualSense-layout frame
+            public byte[] LastOut;
+            public Microsoft.Win32.SafeHandles.SafeFileHandle Write;
+            public int OutLen;
+            public byte Seq;
+            public bool AskedFull;
+        }
+
+        static int FeedbackSize(string kind)
+        {
+            return kind == "xbox360" ? 2 : kind == "dualshock4" ? 8 : 6;
+        }
+
+        static Virtual Attach(Virtual v)
+        {
+            if (v.Kind == "xbox360") XInputExpectVirtual();
+            var added = Api("bus/" + busId + "/add {\"type\":\"" + v.Kind + "\"}");
+            v.DevId = Convert.ToString(added["devId"]);
+            var c = new System.Net.Sockets.TcpClient { NoDelay = true };
+            c.Connect("127.0.0.1", ApiPort);
+            var hello = Encoding.UTF8.GetBytes("bus/" + busId + "/" + v.DevId + "\0");
+            c.GetStream().Write(hello, 0, hello.Length);
+            v.Stream = c;
+            v.LastOut = new byte[FeedbackSize(v.Kind)];
+            new Thread(() => Feedback(v)) { IsBackground = true, Name = "vpad-out" }.Start();
+            return v;
+        }
+
+        static Virtual Create(string path, string pid)
+        {
+            var v = new Virtual { Path = path, Bluetooth = path.IndexOf("{00001124", StringComparison.OrdinalIgnoreCase) >= 0 };
+            v.Kind = emulation == "dualsense" ? (pid == "0df2" ? "dualsenseedge" : "dualsense") : emulation;
+            // The real controller, opened for writing rumble / lightbar.
+            v.Write = CreateFile(path, 0x40000000, 0x1 | 0x2, IntPtr.Zero, 3, 0, IntPtr.Zero);
+            v.OutLen = v.Bluetooth ? 78 : 48;
+            return Attach(v);
+        }
+
+        static void Destroy(Virtual v)
+        {
+            try { v.Stream.Close(); } catch { }
+            try { if (v.Write != null) v.Write.Dispose(); } catch { }
+            try { Api("bus/" + busId + "/remove " + v.DevId); } catch { }
+            if (v.Kind == "xbox360") XInputForgetVirtual(v.DevId);
+        }
+
+        /* ---------------- DualSense frame -> other pads ---------------- */
+
+        /// <summary>VIIPER DualShock 4 state (31 bytes) from a DualSense frame.</summary>
+        static byte[] ToDs4(byte[] f)
+        {
+            var d = new byte[31];
+            Array.Copy(f, 0, d, 0, 4);                         // sticks
+            uint ds = (uint)(f[4] | (f[5] << 8) | (f[6] << 16) | (f[7] << 24));
+            int b = (int)(ds & 0xFFF0);                        // face, shoulders, share, options, L3, R3: same bits
+            if ((ds & 0x10000) != 0) b |= 0x0001;              // PS
+            if ((ds & 0x20000) != 0) b |= 0x0002;              // touchpad click
+            d[4] = (byte)b; d[5] = (byte)(b >> 8);
+            d[6] = f[8];                                       // d-pad
+            d[7] = f[9]; d[8] = f[10];                         // L2 / R2
+            for (int t = 0; t < 2; t++)
+            {
+                int at = 11 + t * 5, to = 9 + t * 5;
+                d[to] = f[at]; d[to + 1] = f[at + 1];          // x (same range)
+                int y = f[at + 2] | (f[at + 3] << 8);
+                PutU16(d, to + 2, y * 942 / 1080);             // the DS4 touchpad is shorter
+                d[to + 4] = f[at + 4];
+            }
+            Array.Copy(f, 21, d, 19, 12);                      // gyro + accel (near-identical scales)
+            return d;
+        }
+
+        /// <summary>VIIPER Xbox 360 state (20 bytes) from a DualSense frame.</summary>
+        static byte[] ToX360(byte[] f)
+        {
+            var x = new byte[20];
+            uint ds = (uint)(f[4] | (f[5] << 8) | (f[6] << 16) | (f[7] << 24));
+            int b = f[8] & 0x0F;                               // d-pad: same bits
+            if ((ds & 0x2000) != 0) b |= 0x0010;               // Options -> Start
+            if ((ds & 0x1000) != 0 || (ds & 0x20000) != 0) b |= 0x0020; // Create / touchpad -> Back
+            if ((ds & 0x4000) != 0) b |= 0x0040;               // L3
+            if ((ds & 0x8000) != 0) b |= 0x0080;               // R3
+            if ((ds & 0x0100) != 0) b |= 0x0100;               // L1
+            if ((ds & 0x0200) != 0) b |= 0x0200;               // R1
+            if ((ds & 0x0020) != 0) b |= 0x1000;               // Cross -> A
+            if ((ds & 0x0040) != 0) b |= 0x2000;               // Circle -> B
+            if ((ds & 0x0010) != 0) b |= 0x4000;               // Square -> X
+            if ((ds & 0x0080) != 0) b |= 0x8000;               // Triangle -> Y
+            x[0] = (byte)b; x[1] = (byte)(b >> 8);
+            x[4] = f[9]; x[5] = f[10];
+            PutI16(x, 6, Axis((sbyte)f[0]));
+            PutI16(x, 8, Axis(-(sbyte)f[1]));                  // Xbox: up is positive
+            PutI16(x, 10, Axis((sbyte)f[2]));
+            PutI16(x, 12, Axis(-(sbyte)f[3]));
+            return x;
+        }
+
+        static int Axis(int v) { v = Math.Max(-128, Math.Min(127, v)); return v < 0 ? v * 256 : v * 258; }
+        static void PutI16(byte[] f, int at, int v) { f[at] = (byte)v; f[at + 1] = (byte)(v >> 8); }
+
+        /// <summary>The frame to send for this virtual pad's type.</summary>
+        static byte[] Frame(Virtual v, byte[] dsFrame)
+        {
+            if (v.Kind == "dualshock4") return ToDs4(dsFrame);
+            if (v.Kind == "xbox360") return ToX360(dsFrame);
+            return dsFrame;
+        }
+
+        /* ---------------- Input: real -> virtual ---------------- */
+
+        [DllImport("hid.dll")] static extern bool HidD_GetFeature(Microsoft.Win32.SafeHandles.SafeFileHandle h, byte[] buf, int len);
+
+        /// <summary>A Bluetooth DualSense sends short reports until its calibration report has been read.</summary>
+        static void AskFullReports(Virtual v)
+        {
+            v.AskedFull = true;
+            try
+            {
+                using (var h = CreateFile(v.Path, 0x80000000 | 0x40000000, 0x1 | 0x2, IntPtr.Zero, 3, 0, IntPtr.Zero))
+                {
+                    if (h.IsInvalid) return;
+                    var b = new byte[64];
+                    b[0] = 0x05;
+                    HidD_GetFeature(h, b, 41);
+                }
+            }
+            catch { }
+        }
+
+        static void PutU16(byte[] f, int at, int v) { f[at] = (byte)v; f[at + 1] = (byte)(v >> 8); }
+
+        /// <summary>DualSense HID input report -> VIIPER's 33-byte DualSense state.</summary>
+        static byte[] State(byte[] b, int n)
+        {
+            var f = new byte[33];
+            int o;
+            bool full;
+            if (b[0] == 0x01 && n >= 64) { o = 1; full = true; }          // USB
+            else if (b[0] == 0x31 && n >= 64) { o = 2; full = true; }     // Bluetooth, full report
+            else if (b[0] == 0x01 && n >= 10) { o = 1; full = false; }    // Bluetooth, short report
+            else return null;
+            int lx = b[o], ly = b[o + 1], rx = b[o + 2], ry = b[o + 3];
+            int l2, r2, b0, b1, b2;
+            if (full) { l2 = b[o + 4]; r2 = b[o + 5]; b0 = b[o + 7]; b1 = b[o + 8]; b2 = b[o + 9]; }
+            else { b0 = b[o + 4]; b1 = b[o + 5]; b2 = b[o + 6]; l2 = b[o + 7]; r2 = b[o + 8]; }
+            f[0] = (byte)(sbyte)(lx - 128);
+            f[1] = (byte)(sbyte)(ly - 128);
+            f[2] = (byte)(sbyte)(rx - 128);
+            f[3] = (byte)(sbyte)(ry - 128);
+            // Same bit layout as the report: face buttons, then shoulders/sticks, then PS/touchpad/mute.
+            // The PS button stays with the launcher (it opens the quick menu), like on a PS5.
+            uint buttons = (uint)(b0 & 0xF0) | ((uint)b1 << 8) | ((uint)(b2 & ~0x01) << 16);
+            f[4] = (byte)buttons; f[5] = (byte)(buttons >> 8); f[6] = (byte)(buttons >> 16); f[7] = (byte)(buttons >> 24);
+            int hat = b0 & 0x0F;
+            byte dpad = 0;
+            if (hat == 0 || hat == 1 || hat == 7) dpad |= 0x01;
+            if (hat == 3 || hat == 4 || hat == 5) dpad |= 0x02;
+            if (hat == 5 || hat == 6 || hat == 7) dpad |= 0x04;
+            if (hat == 1 || hat == 2 || hat == 3) dpad |= 0x08;
+            f[8] = dpad;
+            f[9] = (byte)l2;
+            f[10] = (byte)r2;
+            if (full)
+            {
+                for (int t = 0; t < 2; t++)
+                {
+                    int p = o + 32 + t * 4, at = 11 + t * 5;
+                    bool active = (b[p] & 0x80) == 0;
+                    int x = b[p + 1] | ((b[p + 2] & 0x0F) << 8);
+                    int y = (b[p + 2] >> 4) | (b[p + 3] << 4);
+                    PutU16(f, at, Math.Min(x, 1919));
+                    PutU16(f, at + 2, Math.Min(y, 1079));
+                    f[at + 4] = (byte)(active ? 1 : 0);
+                }
+                Array.Copy(b, o + 15, f, 21, 12); // gyro x/y/z, accel x/y/z (raw int16)
+            }
+            else
+            {
+                PutU16(f, 31, unchecked((ushort)-8192)); // resting, flat
+            }
+            return f;
+        }
+
+        /// <summary>Same motion, nothing pressed, sticks centred.</summary>
+        static byte[] Neutral(byte[] last)
+        {
+            var f = new byte[33];
+            Array.Copy(last, 21, f, 21, 12);
+            return f;
+        }
+
+        public static void OnReport(string path, string pid, byte[] buf, int n)
+        {
+            if (!Enabled || (pid != "0ce6" && pid != "0df2")) return;
+            Virtual v;
+            lock (Gate) Pads.TryGetValue(path, out v);
+            if (v == null) return;
+            if (v.Bluetooth && !v.AskedFull && buf[0] == 0x01 && n < 64) AskFullReports(v);
+            var f = State(buf, n);
+            if (f == null) return;
+            v.Last = f;
+            Push(v);
+        }
+
+        /// <summary>Send the pad's current state (or a neutral one while muted) in its type's format.</summary>
+        static void Push(Virtual v)
+        {
+            var frame = Frame(v, Muted ? Neutral(v.Last) : v.Last);
+            try { v.Stream.GetStream().Write(frame, 0, frame.Length); }
+            catch { }
+        }
+
+        /* ---------------- Our own virtual Xbox 360 pads ----------------
+           With "emulate as Xbox" the virtual pad shows up in XInput; the XInput
+           reader must not take it for a real controller. */
+
+        static readonly HashSet<int> VirtualSlots = new HashSet<int>();
+        static readonly Dictionary<string, int> SlotOfDev = new Dictionary<string, int>();
+        static int expectVirtual;
+        static long expectUntil;
+
+        /// <summary>A virtual Xbox 360 pad is about to be added: the next new XInput slot is it.</summary>
+        static void XInputExpectVirtual()
+        {
+            lock (VirtualSlots)
+            {
+                expectVirtual++;
+                expectUntil = Environment.TickCount + 6000;
+            }
+        }
+
+        static void XInputForgetVirtual(string devId)
+        {
+            lock (VirtualSlots)
+            {
+                int slot;
+                if (devId != null && SlotOfDev.TryGetValue(devId, out slot))
+                {
+                    SlotOfDev.Remove(devId);
+                    VirtualSlots.Remove(slot);
+                }
+            }
+        }
+
+        /// <summary>Called by the XInput reader when a slot becomes connected. True: one of ours.</summary>
+        public static bool XInputSlotAppeared(int slot)
+        {
+            lock (VirtualSlots)
+            {
+                if (VirtualSlots.Contains(slot)) return true;
+                if (expectVirtual > 0 && Environment.TickCount - expectUntil < 0)
+                {
+                    expectVirtual--;
+                    VirtualSlots.Add(slot);
+                    // Tie it to the newest Xbox 360 device so it can be released later.
+                    lock (Gate)
+                    {
+                        var v = Pads.Values.Where(p => p.Kind == "xbox360" && p.DevId != null && !SlotOfDev.ContainsKey(p.DevId)).LastOrDefault();
+                        if (v != null) SlotOfDev[v.DevId] = slot;
+                    }
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>A slot went empty: whatever was there, it can be a real pad next time.</summary>
+        public static void XInputSlotGone(int slot)
+        {
+            lock (VirtualSlots)
+            {
+                VirtualSlots.Remove(slot);
+                foreach (var k in SlotOfDev.Where(p => p.Value == slot).Select(p => p.Key).ToList()) SlotOfDev.Remove(k);
+            }
+        }
+
+        public static bool IsVirtualSlot(int slot)
+        {
+            lock (VirtualSlots) return VirtualSlots.Contains(slot);
+        }
+
+        public static bool ExpectingVirtual
+        {
+            get { lock (VirtualSlots) return expectVirtual > 0 && Environment.TickCount - expectUntil < 0; }
+        }
+
+        /// <summary>A real DualSense showed up (called from the HID reader).</summary>
+        public static void OnConnected(string path, string pid)
+        {
+            if (!Enabled || (pid != "0ce6" && pid != "0df2") || busId < 0 || Pad.IsVirtual(path)) return;
+            lock (Gate) if (Pads.ContainsKey(path)) return;
+            Hide(path);
+            try
+            {
+                var v = Create(path, pid);
+                lock (Gate) Pads[path] = v;
+                Notify();
+            }
+            catch (Exception e)
+            {
+                lastError = e.Message;
+                Notify();
+            }
+        }
+
+        public static void OnGone(string path)
+        {
+            Virtual v;
+            lock (Gate)
+            {
+                if (!Pads.TryGetValue(path, out v)) return;
+                Pads.Remove(path);
+            }
+            Destroy(v);
+            Notify();
+        }
+
+        /* ---------------- Output: game -> real controller ---------------- */
+
+        static uint[] crcTable;
+        static uint Crc32(byte[] data, int start, int len, uint crc)
+        {
+            if (crcTable == null)
+            {
+                crcTable = new uint[256];
+                for (uint i = 0; i < 256; i++)
+                {
+                    var c = i;
+                    for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+                    crcTable[i] = c;
+                }
+            }
+            for (int i = start; i < start + len; i++) crc = crcTable[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+            return crc;
+        }
+
+        [DllImport("kernel32", SetLastError = true)]
+        static extern bool WriteFile(Microsoft.Win32.SafeHandles.SafeFileHandle h, byte[] buf, int len, out int written, IntPtr overlapped);
+
+        static void Feedback(Virtual v)
+        {
+            var size = FeedbackSize(v.Kind);
+            var buf = new byte[size];
+            try
+            {
+                var s = v.Stream.GetStream();
+                while (true)
+                {
+                    int got = 0;
+                    while (got < size)
+                    {
+                        var n = s.Read(buf, got, size - got);
+                        if (n <= 0) return;
+                        got += n;
+                    }
+                    if (buf.SequenceEqual(v.LastOut)) continue;
+                    Array.Copy(buf, v.LastOut, size);
+                    if (v.Kind == "xbox360") WriteOutput(v, buf[1], buf[0], 0, 0, 0, 0, false);
+                    else if (v.Kind == "dualshock4")
+                    {
+                        // flags: 0x01 rumble, 0x02 lightbar
+                        if ((buf[0] & 0x02) != 0) WriteOutput(v, buf[1], buf[2], buf[3], buf[4], buf[5], 0, true);
+                        else WriteOutput(v, buf[1], buf[2], 0, 0, 0, 0, false);
+                    }
+                    else WriteOutput(v, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], true);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>Rumble, lightbar and player lights to the real DualSense (USB report 0x02 / Bluetooth 0x31).</summary>
+        static void WriteOutput(Virtual v, byte small, byte large, byte r, byte g, byte b, byte players, bool lights)
+        {
+            if (v.Write == null || v.Write.IsInvalid) return;
+            var rep = new byte[v.OutLen];
+            int c; // start of the common block
+            if (v.Bluetooth)
+            {
+                rep[0] = 0x31;
+                rep[1] = (byte)(v.Seq << 4);
+                v.Seq = (byte)((v.Seq + 1) & 0x0F);
+                rep[2] = 0x10;
+                c = 3;
+            }
+            else
+            {
+                rep[0] = 0x02;
+                c = 1;
+            }
+            rep[c + 0] = 0x01 | 0x02; // rumble (compatible vibration)
+            rep[c + 1] = (byte)(lights ? 0x04 | 0x10 : 0); // lightbar + player lights (left alone for Xbox / DS4 without a colour)
+            rep[c + 2] = small;
+            rep[c + 3] = large;
+            rep[c + 43] = players;
+            rep[c + 44] = r;
+            rep[c + 45] = g;
+            rep[c + 46] = b;
+            if (v.Bluetooth)
+            {
+                var crc = Crc32(new byte[] { 0xA2 }, 0, 1, 0xFFFFFFFF);
+                crc = ~Crc32(rep, 0, 74, crc);
+                rep[74] = (byte)crc; rep[75] = (byte)(crc >> 8); rep[76] = (byte)(crc >> 16); rep[77] = (byte)(crc >> 24);
+            }
+            int written;
+            WriteFile(v.Write, rep, rep.Length, out written, IntPtr.Zero);
+        }
+
+        /* ---------------- Control ---------------- */
+
+        static void Notify()
+        {
+            Program.Emit(new Dictionary<string, object> { { "event", "passthrough" }, { "state", Status() } });
+        }
+
+        public static object Status()
+        {
+            lock (Gate)
+            {
+                return new Dictionary<string, object>
+                {
+                    { "enabled", Enabled },
+                    { "muted", Muted },
+                    { "hidhide", hidhide },
+                    { "viiper", viiper },
+                    { "devices", Pads.Count },
+                    { "emulation", emulation },
+                    { "allowed", allowed.ToArray() },
+                    { "inverse", inverse },
+                    { "error", lastError },
+                };
+            }
+        }
+
+        /// <summary>Change what the DualSense is shown as; live virtual pads are rebuilt.</summary>
+        public static object Configure(string mode)
+        {
+            if (mode != "dualsense" && mode != "dualshock4" && mode != "xbox360") mode = "dualsense";
+            if (mode == emulation) return Status();
+            emulation = mode;
+            if (!Enabled) return Status();
+            List<Virtual> rebuild;
+            lock (Gate)
+            {
+                rebuild = Pads.Values.ToList();
+                Pads.Clear();
+            }
+            foreach (var v in rebuild) Destroy(v);
+            foreach (var p in Pad.PlayStationPaths()) OnConnected(p.Key, p.Value);
+            Notify();
+            return Status();
+        }
+
+        public static object Enable(bool on)
+        {
+            if (!on && !Enabled)
+            {
+                RemoveRecorded(); // left over from a run that didn't shut down cleanly
+                return Status();
+            }
+            if (on == Enabled) return Status();
+            if (on)
+            {
+                lastError = null;
+                if (!SetupHidHide() || !SetupViiper())
+                {
+                    UnhideAll();
+                    return Status();
+                }
+                Enabled = true;
+                foreach (var p in Pad.PlayStationPaths()) OnConnected(p.Key, p.Value);
+            }
+            else Disable();
+            Notify();
+            return Status();
+        }
+
+        public static void Disable()
+        {
+            Enabled = false;
+            List<Virtual> all;
+            lock (Gate)
+            {
+                all = Pads.Values.ToList();
+                Pads.Clear();
+            }
+            foreach (var v in all) Destroy(v);
+            if (busId >= 0)
+            {
+                try { Api("bus/remove " + busId); } catch { }
+                busId = -1;
+            }
+            UnhideAll();
+        }
+
+        public static object SetMuted(bool m)
+        {
+            Muted = m;
+            List<Virtual> all;
+            lock (Gate) all = Pads.Values.ToList();
+            foreach (var v in all) Push(v);
+            return true;
+        }
+    }
+
     static class Pad
     {
         const int UP = 1, DOWN = 2, LEFT = 4, RIGHT = 8, CONFIRM = 16, BACK = 32, X = 64, Y = 128, OPTIONS = 256, SELECT = 512, L1 = 1024, R1 = 2048, GUIDE = 4096;
@@ -1346,18 +2219,26 @@ namespace PS5GameLauncher
                 {
                     for (uint i = 0; i < 4; i++)
                     {
-                        // Probing empty slots is slow, so only do it every 2 seconds.
-                        if (!connected[i] && Now() - lastProbe[i] < 2000) continue;
+                        // Probing empty slots is slow, so only do it every 2 seconds
+                        // (faster while a virtual Xbox pad of ours is about to show up).
+                        if (!connected[i] && Now() - lastProbe[i] < (Passthrough.ExpectingVirtual ? 150 : 2000)) continue;
                         XINPUT_STATE st;
                         var r = get(i, out st);
                         if (r != 0)
                         {
-                            if (connected[i]) Update("x" + i, 0);
+                            if (connected[i])
+                            {
+                                Update("x" + i, 0);
+                                Passthrough.XInputSlotGone((int)i);
+                            }
                             connected[i] = false;
                             lastProbe[i] = Now();
                             continue;
                         }
+                        if (!connected[i] && Passthrough.XInputSlotAppeared((int)i)) { connected[i] = true; continue; }
                         connected[i] = true;
+                        // Our own virtual Xbox pads aren't menu input.
+                        if (Passthrough.IsVirtualSlot((int)i)) continue;
                         var b = st.Gamepad.wButtons;
                         var m = 0;
                         if ((b & 0x0001) != 0 || st.Gamepad.sThumbLY > 16000) m |= UP;
@@ -1444,6 +2325,70 @@ namespace PS5GameLauncher
             return list;
         }
 
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Locate_DevNode(out uint node, string id, int flags);
+        [DllImport("cfgmgr32.dll")] static extern int CM_Get_Parent(out uint parent, uint node, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Get_Device_ID(uint node, StringBuilder buf, int len, int flags);
+        static readonly Dictionary<string, bool> VirtualCache = new Dictionary<string, bool>();
+
+        /// <summary>"\\?\hid#vid_054c&amp;pid_0ce6#3&amp;abc&amp;0&amp;0000#{guid}" -> "HID\VID_054C&amp;PID_0CE6\3&amp;ABC&amp;0&amp;0000".</summary>
+        public static string InstancePath(string devicePath)
+        {
+            var p = devicePath;
+            if (p.StartsWith("\\\\?\\")) p = p.Substring(4);
+            var cut = p.LastIndexOf("#{", StringComparison.Ordinal);
+            if (cut > 0) p = p.Substring(0, cut);
+            return p.Replace('#', '\\').ToUpperInvariant();
+        }
+
+        /// <summary>
+        /// A controller on a software bus (VIIPER's virtual DualSense sits under the
+        /// root-enumerated USBip host controller). Real controllers hang off PCI/ACPI.
+        /// Without this the helper would mirror its own virtual pads, again and again.
+        /// </summary>
+        public static bool IsVirtual(string path)
+        {
+            lock (VirtualCache)
+            {
+                bool known;
+                if (VirtualCache.TryGetValue(path, out known)) return known;
+            }
+            var result = false;
+            uint node;
+            if (CM_Locate_DevNode(out node, InstancePath(path), 0) == 0)
+            {
+                var sb = new StringBuilder(512);
+                for (var depth = 0; depth < 16; depth++)
+                {
+                    uint parent;
+                    if (CM_Get_Parent(out parent, node, 0) != 0) break;
+                    node = parent;
+                    sb.Length = 0;
+                    if (CM_Get_Device_ID(node, sb, sb.Capacity, 0) != 0) break;
+                    var id = sb.ToString().ToUpperInvariant();
+                    // Reached real hardware (a PCI/ACPI host controller): a real controller.
+                    if (id.StartsWith("PCI\\") || id.StartsWith("ACPI") || id.StartsWith("HTREE\\")) break;
+                    if (id.StartsWith("ROOT\\") || id.Contains("USBIP") || id.Contains("VIIPER")) { result = true; break; }
+                }
+            }
+            lock (VirtualCache) VirtualCache[path] = result;
+            return result;
+        }
+
+        /// <summary>PlayStation controllers being read right now: device path -> product id.</summary>
+        public static Dictionary<string, string> PlayStationPaths()
+        {
+            var d = new Dictionary<string, string>();
+            lock (Gate)
+            {
+                foreach (var p in HidOpen)
+                {
+                    var m = PsPad.Match(p);
+                    if (m.Success) d[p] = m.Groups[1].Value.ToLowerInvariant();
+                }
+            }
+            return d;
+        }
+
         static void HidScanLoop()
         {
             while (true)
@@ -1453,7 +2398,7 @@ namespace PS5GameLauncher
                     foreach (var path in HidPaths())
                     {
                         var m = PsPad.Match(path);
-                        if (!m.Success) continue;
+                        if (!m.Success || IsVirtual(path)) continue;
                         lock (Gate)
                         {
                             if (!HidSeen.Contains(path)) HidSeen.Add(path);
@@ -1466,8 +2411,19 @@ namespace PS5GameLauncher
                     }
                 }
                 catch { }
-                Thread.Sleep(3000);
+                // Normally every 3 seconds; right after a controller restart, quickly.
+                ScanWake.WaitOne(Environment.TickCount - fastScanUntil < 0 ? 150 : 3000);
             }
+        }
+
+        static readonly AutoResetEvent ScanWake = new AutoResetEvent(false);
+        static int fastScanUntil = Environment.TickCount;
+
+        /// <summary>Look for (re)connected controllers often for a while (after a restart).</summary>
+        public static void ScanFast(int ms)
+        {
+            fastScanUntil = Environment.TickCount + ms;
+            ScanWake.Set();
         }
 
         static void HidReader(string path, string pid)
@@ -1487,12 +2443,14 @@ namespace PS5GameLauncher
                         HidD_FreePreparsedData(pre);
                     }
                     var buf = new byte[Math.Max(len, 16)];
+                    Passthrough.OnConnected(path, pid);
                     while (true)
                     {
                         int read;
                         if (!ReadFile(h, buf, len, out read, IntPtr.Zero) || read <= 0) break;
                         var mask = ParsePs(buf, read, pid);
                         if (mask >= 0) Update(src, mask);
+                        Passthrough.OnReport(path, pid, buf, read);
                     }
                 }
             }
@@ -1501,6 +2459,7 @@ namespace PS5GameLauncher
             {
                 Update(src, 0);
                 lock (Gate) HidOpen.Remove(path);
+                Passthrough.OnGone(path);
             }
         }
 

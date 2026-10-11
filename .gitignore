@@ -7,3 +7,7 @@ main/native/syshelper.exe
 *.log
 .DS_Store
 Thumbs.db
+
+# PlayStation SST typeface (Sony / Monotype licence) - local use only, never publish
+sstfont/
+renderer/fonts/sst/

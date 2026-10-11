@@ -73,6 +73,7 @@ const P = {
   skipNext: '<path d="M5 5.2v13.6a.8.8 0 0 0 1.25.66l9.4-6.8a.8.8 0 0 0 0-1.32l-9.4-6.8A.8.8 0 0 0 5 5.2z" fill="currentColor" stroke="none"/><rect x="16.6" y="4.5" width="2.6" height="15" rx="1" fill="currentColor" stroke="none"/>',
   skipPrev: '<path d="M19 5.2v13.6a.8.8 0 0 1-1.25.66l-9.4-6.8a.8.8 0 0 1 0-1.32l9.4-6.8A.8.8 0 0 1 19 5.2z" fill="currentColor" stroke="none"/><rect x="4.8" y="4.5" width="2.6" height="15" rx="1" fill="currentColor" stroke="none"/>',
   bluetooth: '<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  chat: '<path d="M4.5 5h15a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.6 3.6V17H4.5A1.5 1.5 0 0 1 3 15.5v-9A1.5 1.5 0 0 1 4.5 5z"/><path d="M7.5 9.5h9M7.5 12.8h6"/>',
   party: '<circle cx="9" cy="8" r="3.6"/><path d="M2.5 20.5a6.5 6.5 0 0 1 13 0"/><circle cx="17.2" cy="9.2" r="2.7"/><path d="M16.6 14.4a5.2 5.2 0 0 1 5 6.1"/>',
   micOff:
     '<path d="m2 2 20 20"/><path d="M15 9.34V5a3 3 0 0 0-5.94-.6"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M17 16.95A7 7 0 0 1 5 12v-2M19 10v2a7 7 0 0 1-.11 1.23M12 19v3"/>',

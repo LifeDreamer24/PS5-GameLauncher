@@ -33,8 +33,11 @@ Built with Electron and plain HTML, CSS and JavaScript (no framework, no build s
   - monitor brightness over DDC/CI, listed by monitor name;
   - Night Light;
   - Bluetooth: pairing, connecting and removing devices.
-- **Party (Discord)**: see who's in your voice call, mute, deafen, leave, and set volumes.
-- **Focus effects**: the selected item gets a ring with a light travelling around it, and a glint sweeps across it after a moment.
+- **Party and Messages (Discord)**: see who's in your voice call, mute, deafen, leave, and set volumes. New DMs and mentions pop up as notifications (also over games), and **Messages** in the quick menu shows recent conversations with their latest messages. Discord's local API can't send messages, so **Reply in Discord** opens the conversation in Discord.
+- **Notifications**: Settings › Notifications turns pop-ups on or off, sets how long they stay and whether they show a preview, and chooses per type (Discord, party, controllers, games, library, system) whether they always show, hide during games, or never show. While a game runs, pop-ups appear on top of it without taking focus.
+- **Sound themes**: browse and download Steam Deck audio packs (UI sounds and menu music) from [deckthemes.com](https://deckthemes.com/packs?type=AUDIO) right in the launcher, or install a pack from a .zip or folder (Settings › Sound › Sound Theme).
+- **Controller passthrough** (optional): with [HidHide](https://github.com/nefarius/HidHide) and [VIIPER](https://github.com/Alia5/VIIPER) installed, games get a virtual DualSense that the launcher feeds from your real one, and it goes quiet while the quick menu or the launcher is in front, so games stop reacting to menu presses. Rumble, lightbar and player lights pass back. See User Guide › Controller in Games.
+- **Focus effects**: the selected item gets a ring with a light travelling around it, a glint sweeps across it after a moment, and moving through a list sends a soft wave of light across the new row, like on the PS5.
 - Synthesized UI sounds, an optional ambient music track, and an on-screen keyboard.
 
 ## Download
@@ -196,7 +199,8 @@ main/                 Electron main process
   metadata.js         Steam store search, assets, SteamGridDB, downloads
   launcher.js         starting games
   gamemonitor.js      finds the running game, play time, closing games
-  overlay.js          the in-game overlay window
+  overlay.js          the in-game overlay window (and pop-ups over games)
+  soundpacks.js       sound themes: deckthemes.com browsing, download, unzip
   system.js           bridge to native/syshelper.exe
   discord.js          Discord voice control over Discord's local RPC pipe
   vdf.js              Valve KeyValues parser
@@ -206,8 +210,8 @@ renderer/
   overlay.html        the in-game overlay (js/overlay.js)
   css/                base, home, library, settings, quickmenu, overlays, boot
   js/app.js           router, input routing, settings → UI
-  js/views/           boot (welcome), home, library, hub, settings (+ guide), quickmenu, search
-  js/ui/              dialogs, on-screen keyboard, tiles, hero art, boot stage, toasts
+  js/views/           boot (welcome), home, library, hub, settings (+ guide), quickmenu, search, sound store
+  js/ui/              dialogs, on-screen keyboard, tiles, hero art, boot stage, toasts, Discord chat
   js/input.js         keyboard / gamepad / mouse → actions
   js/i18n.js          translations (js/locales/: de, es, fr, pt)
   js/system.js        media, volume, output device, brightness, Bluetooth state

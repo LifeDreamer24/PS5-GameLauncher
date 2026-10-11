@@ -1,10 +1,12 @@
 // Declarative settings tree: categories → sections → items.
 
-import { api, state, refreshInfo, pushNotification } from '../state.js';
+import { api, state, refreshInfo, pushNotification, setSetting } from '../state.js';
 import { fmtBytes } from '../util.js';
 import { confirmDialog, optionsMenu } from '../ui/dialogs.js';
 import { AVATARS } from '../ui/avatar.js';
 import { guideCategory } from './guide.js';
+import { openSoundStore } from './soundstore.js';
+import { emit, on } from '../state.js';
 import { LANGUAGES } from '../i18n.js';
 import { activeProfileId, pickProfileImage, updateProfile } from '../profiles.js';
 import { connectedPads } from '../input.js';
@@ -131,6 +133,154 @@ function outputItems() {
   ];
 }
 
+/* Controller passthrough ------------------------------------------- */
+function passthroughItems() {
+  if (!state.settings.controllerPassthrough) return [];
+  const st = state.passthrough;
+  let value = 'Starting…';
+  let cls = '';
+  let note = null;
+  if (st) {
+    if (st.hidhide === 'missing') {
+      value = 'HidHide not installed';
+      note = 'Install HidHide (see User Guide › Controller in Games), then turn this off and on again.';
+    } else if (st.hidhide === 'denied') {
+      value = 'HidHide refused access';
+      note = 'HidHide only lets administrators change it on this PC. Hide your DualSense in the HidHide app yourself and add the launcher\'s syshelper.exe under Applications.';
+    } else if (st.viiper === 'missing') {
+      value = 'VIIPER is not running';
+      note = 'Install VIIPER and let it start with Windows (see User Guide › Controller in Games).';
+    } else if (st.realGame) {
+      value = 'Paused for this game';
+      note = t('{name} uses the real controller, so passthrough is off while it runs. The game is paused whenever a menu is open instead.', { name: st.realGame });
+    } else if (st.enabled) {
+      value = st.devices ? t(st.devices === 1 ? '1 controller' : '{n} controllers', { n: st.devices }) : 'Waiting for a DualSense';
+      cls = st.devices ? 'ok' : '';
+      note = 'Games now see a virtual DualSense that goes quiet while the quick menu or the launcher is in front. Your controller reconnects by itself once when this turns on, so games that had it open switch over. Choose Controller › Real Controller in a game’s options to keep HD haptics and adaptive triggers there.';
+    } else if (st.error) value = st.error;
+    // Programs on HidHide's own list still read the real controller (double input).
+    if (st.enabled && st.allowed && st.allowed.length) {
+      note = t('These programs are allowed in HidHide and still see your real controller, so games can get double input: {list}. Remove them in the HidHide app under Applications, then turn this off and on.', { list: st.allowed.join(', ') });
+    } else if (st.enabled && st.inverse) {
+      note = 'HidHide is set to Inverse application cover, so other programs can still see your real controller. Turn that off in the HidHide app.';
+    } else if (st.enabled && st.error) {
+      note = st.error;
+    }
+  }
+  return [
+    { type: 'info', label: 'Controller Passthrough', value, valueClass: cls },
+    note ? { type: 'note', label: note } : null,
+    {
+      type: 'choice',
+      key: 'passthroughEmulation',
+      label: 'Emulate DualSense As',
+      options: [
+        { value: 'dualsense', label: 'DualSense' },
+        { value: 'dualshock4', label: 'DualShock 4' },
+        { value: 'xbox360', label: 'Xbox Controller' },
+      ],
+    },
+  ];
+}
+
+/* Sound themes ------------------------------------------------------ */
+let packList = null;
+async function loadPacks() {
+  try {
+    packList = await api.soundPacks();
+  } catch {
+    packList = [];
+  }
+  emit('soundpacks');
+}
+on('soundpacks-changed', () => loadPacks());
+
+// UI sounds come as files named after the Steam Deck sounds, or (newer packs)
+// as "mappings" from those names to the pack's own files.
+const isUiPack = (p) => p.files.some((f) => /^(deck_ui_|confirmation_|bumper_end)/i.test(f)) || Object.keys(p.mappings || {}).length > 0;
+const isMusicPack = (p) => !!p.music;
+
+/** UI Sounds / Menu Music: the theme in use (a drop-down), browsing, removing. */
+function packChoiceItems(kind) {
+  const music = kind === 'music';
+  const key = music ? 'musicPack' : 'soundPack';
+  const items = music
+    ? [onOff('ambient', 'Menu Music'), { type: 'range', key: 'ambientVolume', label: 'Music Volume', min: 0, max: 100, step: 5, unit: '%' }]
+    : [onOff('uiSounds', 'Interface Sounds'), { type: 'range', key: 'uiVolume', label: 'Interface Volume', min: 0, max: 100, step: 5, unit: '%' }];
+  if (packList === null) {
+    items.push({ type: 'header', label: 'Looking for sound themes', busy: true });
+    return items;
+  }
+  const packs = packList.filter(music ? isMusicPack : isUiPack);
+  const builtin = music ? 'Generated Ambient Music' : 'Built-in Sounds';
+  const current = () => packs.find((p) => p.id === state.settings[key]) || null;
+  items.push({
+    type: 'action',
+    icon: music ? 'music' : 'volume',
+    label: music ? 'Music' : 'Sound Theme',
+    value: current() ? current().name : builtin,
+    run: async (el) => {
+      const cur = current();
+      const choice = await optionsMenu({
+        title: music ? 'Music' : 'Sound Theme',
+        anchor: el,
+        index: cur ? packs.indexOf(cur) + 1 : 0,
+        items: [
+          { id: null, label: builtin, checked: !cur },
+          ...packs.map((p) => ({ id: p.id, label: p.name, hint: p.author, checked: cur === p })),
+        ],
+      });
+      if (!choice || choice.id === (cur ? cur.id : null)) return;
+      await setSetting(key, choice.id);
+      if (music && choice.id && !state.settings.ambient) await setSetting('ambient', true);
+    },
+  });
+  items.push({ type: 'action', icon: 'download', label: music ? 'Browse Menu Music…' : 'Browse Sound Themes…', run: () => openSoundStore({ kind: music ? 'Music' : 'Audio' }) });
+  if (packs.length) {
+    items.push({
+      type: 'action',
+      icon: 'trash',
+      label: music ? 'Delete Menu Music…' : 'Delete a Sound Theme…',
+      run: async (el) => {
+        const choice = await optionsMenu({
+          title: music ? 'Delete Menu Music' : 'Delete a Sound Theme',
+          anchor: el,
+          items: packs.map((p) => ({ id: p.id, label: p.name, hint: p.author, icon: 'trash' })),
+        });
+        const p = choice && packs.find((x) => x.id === choice.id);
+        if (!p) return;
+        const both = isUiPack(p) && isMusicPack(p);
+        const ok = await confirmDialog({
+          title: t('Delete {name}?', { name: p.name }),
+          message: both ? 'This pack has both interface sounds and menu music; both are deleted.' : 'You can download it again from the store.',
+          confirmLabel: 'Delete',
+          danger: true,
+        });
+        if (!ok) return;
+        await api.removeSoundPack(p.id);
+        await loadPacks();
+      },
+    });
+  }
+  const install = (from) => async () => {
+    const p = await api.installSoundPack(from);
+    if (!p) return;
+    await loadPacks();
+    await setSetting(isUiPack(p) ? 'soundPack' : 'musicPack', p.id);
+  };
+  items.push(
+    { type: 'action', icon: 'file', label: 'Install from a .zip File…', run: install('zip') },
+    { type: 'action', icon: 'folderPlus', label: 'Install from a Folder…', run: install('folder') },
+    {
+      type: 'note',
+      label: music
+        ? 'Menu music packs are Steam Deck Audio Loader packs from deckthemes.com. It plays on the home screen once you have picked your profile.'
+        : 'Sound themes are Steam Deck Audio Loader packs from deckthemes.com. Sounds a theme leaves out keep the built-in ones.',
+    }
+  );
+  return items;
+}
+
 function bluetoothItems() {
   const bt = sys.bt;
   if (!bt) return [{ type: 'header', label: 'Looking for Bluetooth', busy: true }];
@@ -189,9 +339,60 @@ function scanItems() {
   return items;
 }
 
+const NOTIFY_WHEN = [
+  { value: 'always', label: 'Always Show' },
+  { value: 'notInGame', label: 'Hide During Games' },
+  { value: 'never', label: "Don't Show" },
+];
+const NOTIFY_KINDS = [
+  { id: 'discord', label: 'Discord Messages', icon: 'party' },
+  { id: 'party', label: 'Party and Voice Chat', icon: 'mic' },
+  { id: 'controller', label: 'Controllers', icon: 'gamepad' },
+  { id: 'game', label: 'Game Sessions', icon: 'play' },
+  { id: 'library', label: 'Library and Artwork', icon: 'library' },
+  { id: 'system', label: 'System', icon: 'settings' },
+];
+
+function notificationsCategory() {
+  return {
+    id: 'notifications',
+    label: 'Notifications',
+    icon: 'bell',
+    desc: 'Pop-ups, and which ones you see when',
+    sections: [
+      {
+        label: 'Pop-Ups',
+        items: () => [
+          onOff('notifPopups', 'Allow Pop-Up Notifications'),
+          onOff('notifPreview', 'Show Preview'),
+          {
+            type: 'choice',
+            key: 'notifDuration',
+            label: 'Display Time',
+            options: [
+              { value: 'short', label: 'Short' },
+              { value: 'default', label: 'Default' },
+              { value: 'long', label: 'Long' },
+            ],
+          },
+          {
+            type: 'action',
+            icon: 'bell',
+            label: 'Show a Test Notification',
+            run: () => pushNotification({ title: 'PS5 Game Launcher', body: 'This is how notifications look.', icon: 'bell', kind: 'system' }),
+          },
+          { type: 'note', label: 'Select which pop-ups you want to see, and when you want to see them. While a game is running, pop-ups appear over the game. Everything is still listed under Notifications in the quick menu.' },
+          ...NOTIFY_KINDS.map((k) => ({ type: 'choice', key: `notif_${k.id}`, label: k.label, icon: k.icon, options: NOTIFY_WHEN })),
+        ],
+      },
+    ],
+  };
+}
+
 export function buildSchema(router) {
   const cats = [
     guideCategory(router),
+    notificationsCategory(),
     {
       id: 'library',
       label: 'Library',
@@ -368,14 +569,8 @@ export function buildSchema(router) {
                 ],
         },
         { label: 'Output Device', items: outputItems, onEnter: () => loadOutputs() },
-        {
-          label: 'Interface',
-          items: () => [onOff('uiSounds', 'Interface Sounds'), { type: 'range', key: 'uiVolume', label: 'Interface Volume', min: 0, max: 100, step: 5, unit: '%' }],
-        },
-        {
-          label: 'Ambient Music',
-          items: () => [onOff('ambient', 'Ambient Music on Home'), { type: 'range', key: 'ambientVolume', label: 'Music Volume', min: 0, max: 100, step: 5, unit: '%' }],
-        },
+        { label: 'UI Sounds', items: () => packChoiceItems('ui'), onEnter: () => loadPacks() },
+        { label: 'Menu Music', items: () => packChoiceItems('music'), onEnter: () => loadPacks() },
       ],
     },
     {
@@ -508,10 +703,20 @@ export function buildSchema(router) {
       desc: 'Startup and game launch behaviour',
       sections: [
         {
-          label: 'Language',
+          label: 'Language and Font',
           items: () => [
             { type: 'choice', key: 'language', label: 'Language', icon: 'globe', options: LANGUAGES },
             { type: 'note', label: 'The interface reloads in the new language. Game names and descriptions stay as they come from the store.' },
+            {
+              type: 'choice',
+              key: 'font',
+              label: 'Font',
+              icon: 'palette',
+              options: [
+                { value: 'system', label: 'Segoe UI (Windows)' },
+                { value: 'sst', label: 'SST (PlayStation)' },
+              ],
+            },
           ],
         },
         {
@@ -524,6 +729,17 @@ export function buildSchema(router) {
             onOff('overlay', 'Quick Menu Over Games'),
             onOff('overlayHotkey', 'Keyboard Shortcut (Ctrl+Alt+Home)'),
             onOff('pauseGames', 'Pause Game While Menus Are Open'),
+            {
+              type: 'toggle',
+              label: 'Block Controller in Games While Menus Are Open',
+              get: () => !!state.settings.controllerPassthrough,
+              set: async (v) => {
+                // The controller reconnects once either way, which takes a moment.
+                pushNotification({ title: v ? 'Setting up your controller…' : 'Switching back to your controller…', body: 'It reconnects in a moment. Wait a few seconds before pressing buttons.', icon: 'gamepad', kind: 'controller' });
+                await setSetting('controllerPassthrough', v);
+              },
+            },
+            ...passthroughItems(),
             {
               type: 'note',
               label:
@@ -653,6 +869,6 @@ export function buildSchema(router) {
     },
   ];
   // Same order as the console's settings list.
-  const order = ['guide', 'library', 'home', 'users', 'system', 'storage', 'sound', 'screen', 'bluetooth', 'accessories', 'about'];
+  const order = ['guide', 'library', 'home', 'notifications', 'users', 'system', 'storage', 'sound', 'screen', 'bluetooth', 'accessories', 'about'];
   return order.map((id) => cats.find((c) => c.id === id)).filter(Boolean);
 }

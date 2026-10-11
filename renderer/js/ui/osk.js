@@ -94,15 +94,15 @@ export function createOSK(cb) {
       sfx.toggle();
     } else if (k === 'space') {
       cb.onChar(' ');
-      sfx.tick();
+      sfx.type();
     } else if (k === 'back') {
       cb.onBackspace();
-      sfx.tick();
+      sfx.type();
     } else if (k === 'done') {
       cb.onDone();
     } else {
       cb.onChar(shift ? k.toUpperCase() : k);
-      sfx.tick();
+      sfx.type();
       if (shift) {
         shift = false;
         refreshCase();

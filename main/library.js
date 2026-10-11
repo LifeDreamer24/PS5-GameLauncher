@@ -436,7 +436,7 @@ class Library {
   update(id, patch) {
     const g = this.find(id);
     if (!g) return null;
-    const allowed = ['name', 'favorite', 'hidden', 'category', 'lastPlayed', 'launchCount', 'playtime', 'pauseMode', 'launchMode'];
+    const allowed = ['name', 'favorite', 'hidden', 'category', 'lastPlayed', 'launchCount', 'playtime', 'pauseMode', 'launchMode', 'controllerMode'];
     for (const k of allowed) if (k in patch) g[k] = patch[k];
     if ('name' in patch) g.nameLocked = true;
     if (patch.launchArgs !== undefined) {

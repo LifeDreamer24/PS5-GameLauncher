@@ -15,7 +15,7 @@ export async function continueGame(game) {
   sfx.select();
   try {
     const r = await api.continueGame(game.id);
-    if (!r || !r.continued) pushNotification({ title: game.name, body: "Couldn't switch to the game window.", icon: 'info' });
+    if (!r || !r.continued) pushNotification({ title: game.name, body: "Couldn't switch to the game window.", icon: 'info', kind: 'game' });
   } catch {}
 }
 
@@ -66,7 +66,7 @@ Unsaved progress may be lost.`,
     if (!ok) return;
     const closed = await closeRunningGame(other, { ask: false });
     if (!closed) {
-      pushNotification({ title: other.name, body: "The game didn't close, so the new one wasn't started.", icon: 'info' });
+      pushNotification({ title: other.name, body: "The game didn't close, so the new one wasn't started.", icon: 'info', kind: 'game' });
       return;
     }
   }
@@ -108,7 +108,7 @@ Unsaved progress may be lost.`,
     if (how !== 'shown') api.launchCancel().catch(() => {});
   } catch (err) {
     sfx.error();
-    pushNotification({ title: t("Couldn't start {name}", { name: game.name }), body: String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), icon: 'info' });
+    pushNotification({ title: t("Couldn't start {name}", { name: game.name }), body: String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), icon: 'info', kind: 'game' });
   } finally {
     shown.cancel();
     app.classList.remove('launching');
@@ -203,6 +203,30 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
       if (choice) await api.updateGame(id, { pauseMode: choice.value });
     },
   });
+  // Controller passthrough: single-player games that use the DualSense's own
+  // features (HD haptics, adaptive triggers) can get the real controller and
+  // are paused while a menu is open instead.
+  if (state.settings.controllerPassthrough) {
+    const CONTROLLER_MODES = [
+      { value: 'virtual', label: 'Virtual Controller', hint: 'Ignores presses in menus' },
+      { value: 'real', label: 'Real Controller', hint: 'HD haptics, adaptive triggers' },
+    ];
+    const controllerMode = game.controllerMode || 'virtual';
+    items.push({
+      label: 'Controller',
+      icon: 'gamepad',
+      hint: CONTROLLER_MODES.find((m) => m.value === controllerMode).label,
+      submenu: true,
+      run: async () => {
+        const choice = await optionsMenu({
+          title: 'Controller for This Game',
+          anchor,
+          items: CONTROLLER_MODES.map((m) => ({ ...m, checked: m.value === controllerMode })),
+        });
+        if (choice) await api.updateGame(id, { controllerMode: choice.value });
+      },
+    });
+  }
   // Store games can start through their store (kept hidden) or straight from
   // their own executable, without the store client.
   const STORES = { steam: 'Steam', epic: 'Epic Games', ubisoft: 'Ubisoft Connect' };

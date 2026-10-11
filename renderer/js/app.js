@@ -1,7 +1,7 @@
 import { $, h } from './util.js';
-import { state, on, loadState, api, pushNotification } from './state.js';
-import { setHandler, externalAction } from './input.js';
-import { sfx, configureSound, setAmbient, unlockAudio, resetAudio } from './sound.js';
+import { state, on, emit, loadState, api, pushNotification } from './state.js';
+import { setHandler, externalAction, setGamepadPolling, setGamepadProbe } from './input.js';
+import { sfx, configureSound, setAmbient, unlockAudio, resetAudio, setSoundPacks } from './sound.js';
 import { background } from './background.js';
 import { heroBg } from './ui/herobg.js';
 import { topOverlay } from './ui/overlay.js';
@@ -86,6 +86,51 @@ function transition(from, to, params, dir) {
 /* ------------------------------------------------------------------ */
 
 let appliedLanguage = null;
+let packsKey = null;
+// Menu music waits until the user has picked their profile.
+let ambientReady = false;
+
+// Another app is playing media (Spotify, a video…): the menu music waits.
+let otherMedia = false;
+let mediaTimer = null;
+
+function updateAmbient() {
+  const s = state.settings;
+  const want = ambientReady && !!s.ambient && state.window.focused !== false;
+  setAmbient(want && !otherMedia, (s.ambientVolume ?? 35) / 100);
+  // Watch Windows media sessions only while the music would play.
+  if (want && !mediaTimer) {
+    mediaTimer = setInterval(checkOtherMedia, 2000);
+    checkOtherMedia();
+  } else if (!want && mediaTimer) {
+    clearInterval(mediaTimer);
+    mediaTimer = null;
+  }
+}
+
+async function checkOtherMedia() {
+  let playing = false;
+  try {
+    playing = !!(await api.mediaPlaying());
+  } catch {}
+  if (playing === otherMedia) return;
+  otherMedia = playing;
+  updateAmbient();
+}
+
+/** Load the chosen sound / music packs when they change. */
+async function applySoundPacks(force = false) {
+  const s = state.settings;
+  const key = `${s.soundPack || ''}|${s.musicPack || ''}`;
+  if (!force && key === packsKey) return;
+  packsKey = key;
+  try {
+    await setSoundPacks(await api.soundPacks(), s.soundPack, s.musicPack);
+  } catch {}
+  // The menu music switches to the newly loaded track by itself.
+  updateAmbient();
+}
+on('soundpacks', () => applySoundPacks(true));
 
 function applySettings() {
   const s = state.settings;
@@ -93,15 +138,17 @@ function applySettings() {
   // the Language setting (without the welcome screen).
   if (appliedLanguage !== null && (s.language || 'auto') !== appliedLanguage) {
     try {
-      sessionStorage.setItem('reopen', JSON.stringify({ category: 'system', section: 'Language' }));
+      sessionStorage.setItem('reopen', JSON.stringify({ category: 'system', section: 'Language and Font' }));
     } catch {}
     location.reload();
     return;
   }
   document.documentElement.style.setProperty('--ui-scale', String((s.uiScale || 100) / 100));
   document.body.classList.toggle('reduce-motion', !!s.reduceMotion);
+  document.documentElement.classList.toggle('font-sst', s.font === 'sst');
   configureSound(s);
-  setAmbient(!!s.ambient && state.window.focused !== false, (s.ambientVolume ?? 35) / 100);
+  applySoundPacks();
+  updateAmbient();
   background.setMode(s.reduceMotion && s.background === 'animated' ? 'static' : s.background);
   heroBg.setMotion(s.heroMotion !== false && !s.reduceMotion);
   updateClocks();
@@ -131,7 +178,7 @@ function applyWindow() {
   document.documentElement.classList.toggle('windowed', windowed);
   document.body.classList.toggle('windowed', windowed);
   // Pause the ambient music while another app (e.g. a game) has focus.
-  setAmbient(!!state.settings.ambient && state.window.focused !== false, (state.settings.ambientVolume ?? 35) / 100);
+  updateAmbient();
 }
 
 /* ------------------------------------------------------------------ */
@@ -195,8 +242,41 @@ async function main() {
   // Guide button read natively (works for every controller type).
   api.on('pad:action', (a) => {
     const action = typeof a === 'string' ? a : a && a.action;
-    if (action === 'guide' && !booting) externalAction('guide');
+    if (action === 'guide') {
+      if (!booting) externalAction('guide');
+    } else if (action && ((state.passthrough && state.passthrough.enabled) || padFallback)) externalAction(action, { repeat: !!(a && a.repeat) });
   });
+  // Passthrough just went off: until the browser sees the real controller
+  // again (it reconnects), keep reading it through the helper.
+  let padFallback = false;
+  const setPadFallback = (on) => {
+    if (padFallback === on) return;
+    padFallback = on;
+    api.padFallback(on).catch(() => {});
+  };
+
+  // Controller passthrough: the browser would only see the (muted) virtual
+  // controller, so read the real one through the helper instead.
+  const applyPassthrough = (st) => {
+    const was = !!(state.passthrough && state.passthrough.enabled);
+    state.passthrough = st || null;
+    const now = !!(st && st.enabled);
+    if (now) {
+      setGamepadProbe(null);
+      setGamepadPolling(false);
+      setPadFallback(false);
+    } else if (was) {
+      // Keep using the helper until the browser delivers a press itself.
+      setPadFallback(true);
+      setGamepadProbe(() => {
+        setPadFallback(false);
+        setGamepadPolling(true);
+      });
+    } else if (!padFallback) setGamepadPolling(true);
+    emit('passthrough');
+  };
+  api.on('passthrough:state', applyPassthrough);
+  api.passthroughStatus().then(applyPassthrough).catch(() => {});
   // Requests from the in-game overlay ("Home", "Game Library", closing a game…).
   api.on('navigate', (nav) => {
     if (!nav || booting) return;
@@ -211,16 +291,9 @@ async function main() {
   on('game-exited', (e) => {
     const g = state.games.find((x) => x.id === e.id);
     if (!g || e.shortLived) return;
-    pushNotification({ title: g.name, body: e.minutes ? t(e.minutes === 1 ? 'You played for 1 minute.' : 'You played for {n} minutes.', { n: e.minutes }) : 'Session ended.', icon: 'gamepad' });
+    pushNotification({ title: g.name, body: e.minutes ? t(e.minutes === 1 ? 'You played for 1 minute.' : 'You played for {n} minutes.', { n: e.minutes }) : 'Session ended.', icon: 'gamepad', kind: 'game' });
   });
-  on('gamepad', (e) => {
-    if (booting) return;
-    pushNotification({
-      title: e.connected ? 'Controller connected' : 'Controller disconnected',
-      body: e.pad.id.replace(/\s*\(.*\)\s*$/, '') || 'Gamepad',
-      icon: 'gamepad',
-    });
-  });
+  on('gamepad', (e) => controllerNotice(e));
 
   setupDragDrop();
   window.__app = { router, state };
@@ -242,7 +315,47 @@ async function main() {
   });
   booting = false;
   bootHandler = null;
+  ambientReady = true;
+  updateAmbient();
   if (reopen) router.open('settings', reopen);
+}
+
+/*
+ * Controller connected / disconnected pop-ups. Controller passthrough swaps
+ * the real pad for a virtual one (and briefly reconnects it), so: a pad that
+ * comes back within a few seconds isn't announced at all, nothing is
+ * announced while passthrough is switching, and at most one pop-up shows
+ * every few seconds.
+ */
+const padNotice = { pending: new Map(), lastShown: 0, quietUntil: 0, recent: new Map() };
+on('passthrough', () => {
+  padNotice.quietUntil = Date.now() + 8000;
+});
+function controllerNotice(e) {
+  if (booting) return;
+  const name = e.pad.id.replace(/\s*\(.*\)\s*$/, '') || 'Gamepad';
+  const now = Date.now();
+  if (now < padNotice.quietUntil) return;
+  const pending = padNotice.pending.get(name);
+  if (pending) {
+    // Disconnected and back again (or the other way round): say nothing.
+    clearTimeout(pending.timer);
+    padNotice.pending.delete(name);
+    if (pending.connected !== e.connected) return;
+  }
+  const timer = setTimeout(() => {
+    padNotice.pending.delete(name);
+    const t0 = Date.now();
+    if (t0 < padNotice.quietUntil) return;
+    // The same news about the same pad twice in a row isn't worth repeating.
+    const key = `${name}|${e.connected}`;
+    if (t0 - (padNotice.recent.get(key) || 0) < 30000) return;
+    if (t0 - padNotice.lastShown < 4000) return;
+    padNotice.recent.set(key, t0);
+    padNotice.lastShown = t0;
+    pushNotification({ title: e.connected ? 'Controller connected' : 'Controller disconnected', body: name, icon: 'gamepad', kind: 'controller' });
+  }, 3000);
+  padNotice.pending.set(name, { connected: e.connected, timer });
 }
 
 function setupDragDrop() {

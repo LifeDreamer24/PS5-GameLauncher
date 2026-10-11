@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld('api', {
   overlayClosed: invoke('overlay:closed'),
   overlayNavigate: invoke('overlay:navigate'),
   overlayToggle: invoke('overlay:toggle'),
+  popupInGame: invoke('notify:popup'),
+  passthroughStatus: invoke('passthrough:status'),
+  padFallback: invoke('pad:fallback'),
+  soundPacks: invoke('sounds:list'),
+  browseSoundPacks: invoke('sounds:browse'),
+  downloadSoundPack: invoke('sounds:download'),
+  removeSoundPack: invoke('sounds:remove'),
+  installSoundPack: invoke('sounds:installLocal'),
 
   searchSteam: invoke('steam:search'),
 
@@ -41,9 +49,13 @@ contextBridge.exposeInMainWorld('api', {
   discordDisconnect: invoke('discord:disconnect'),
   discordForget: invoke('discord:forget'),
   discordCmd: invoke('discord:cmd'),
+  discordOpenChat: invoke('discord:openChat'),
+  discordCloseChat: invoke('discord:closeChat'),
+  discordOpenInDiscord: invoke('discord:openInDiscord'),
 
   sysAvailable: invoke('sys:available'),
   media: invoke('sys:media'),
+  mediaPlaying: invoke('sys:mediaPlaying'),
   mediaCommand: invoke('sys:mediaCmd'),
   getVolume: invoke('sys:volume'),
   setVolume: invoke('sys:setVolume'),
@@ -69,7 +81,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'game:started'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

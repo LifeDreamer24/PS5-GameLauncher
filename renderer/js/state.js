@@ -95,8 +95,19 @@ export async function setSetting(key, value) {
   state.settings = saved;
 }
 
+/** Notification kinds, for Settings › Notifications. */
+export const NOTIFICATION_KINDS = ['discord', 'party', 'controller', 'game', 'library', 'system'];
+
+function kindOf(n) {
+  if (n.kind) return n.kind;
+  if (n.icon === 'party') return 'party';
+  if (['library', 'check', 'refresh', 'image'].includes(n.icon)) return 'library';
+  return 'system';
+}
+
 export function pushNotification(n) {
   const item = { id: Math.random().toString(36).slice(2), time: Date.now(), read: false, icon: 'bell', ...n };
+  item.kind = kindOf(item);
   state.notifications.unshift(item);
   state.notifications = state.notifications.slice(0, 40);
   emit('notifications', item);

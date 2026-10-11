@@ -73,10 +73,38 @@ class OverlayManager {
   }
 
   /** Show the overlay on the monitor of the current foreground window. */
+  /**
+   * A notification over the game: the window is shown without focus and lets
+   * every click through, so the game keeps running as before.
+   */
+  async popup(n) {
+    if (!this.win) this.create();
+    this.send('overlay:toast', n);
+    if (this.visible) return;
+    if (!this.toastShown) {
+      const fg = await this.system.foreground();
+      const display = fg && fg.w > 0 ? screen.getDisplayMatching({ x: fg.x, y: fg.y, width: fg.w, height: fg.h }) : screen.getPrimaryDisplay();
+      this.win.setBounds(display.bounds);
+      this.win.setIgnoreMouseEvents(true);
+      this.win.showInactive();
+      this.win.setAlwaysOnTop(true, 'screen-saver');
+      this.toastShown = true;
+    }
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => {
+      this.toastShown = false;
+      if (!this.visible && this.win) this.win.hide();
+      if (this.win) this.win.setIgnoreMouseEvents(false);
+    }, (n.duration || 5000) + 900);
+  }
+
   async show(info = {}) {
     if (!this.win) this.create();
     if (this.visible) return;
     clearTimeout(this.hideTimer);
+    clearTimeout(this.toastTimer);
+    this.toastShown = false;
+    this.win.setIgnoreMouseEvents(false);
     this.visible = true;
     const fg = await this.system.foreground();
     this.prevForeground = fg && fg.hwnd ? fg.hwnd : null;

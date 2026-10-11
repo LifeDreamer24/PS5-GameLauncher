@@ -65,7 +65,8 @@ class SystemBridge extends EventEmitter {
       this.failures++;
     });
     proc.on('error', () => {});
-    if (this.forward) setTimeout(() => this.setPadForward(true), 300);
+    if (this.forward || this.keepForward) setTimeout(() => this.setPadForward(this.forward), 300);
+    if (this.passthroughArgs) setTimeout(() => this.request('passthrough', this.passthroughArgs).catch(() => {}), 600);
   }
 
   request(cmd, args = {}, timeout = 8000) {
@@ -210,7 +211,13 @@ class SystemBridge extends EventEmitter {
 
   setPadForward(on) {
     this.forward = !!on;
-    return this.request('padForward', { value: this.forward }).catch(() => {});
+    return this.request('padForward', { value: this.forward || !!this.keepForward }).catch(() => {});
+  }
+
+  /** Keep controller buttons coming even without the overlay (controller passthrough). */
+  keepPadForward(on) {
+    this.keepForward = !!on;
+    return this.setPadForward(this.forward);
   }
 
   foreground() {

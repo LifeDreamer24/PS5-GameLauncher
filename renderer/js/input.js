@@ -190,6 +190,15 @@ export function setGamepadPolling(on) {
   pollPads = !!on;
 }
 
+let probe = null;
+/**
+ * While polling is off, call fn once the browser reports a press on any pad
+ * (it sees the controller again). The press itself isn't fired twice.
+ */
+export function setGamepadProbe(fn) {
+  probe = fn || null;
+}
+
 /** Input that arrives from the main process (native controller reading). */
 export function externalAction(action, { repeat = false } = {}) {
   setDevice('gamepad');
@@ -211,6 +220,18 @@ function currentPressed(pad) {
 
 function poll(now) {
   if (!pollPads) {
+    if (probe && document.hasFocus()) {
+      for (const pad of navigator.getGamepads ? navigator.getGamepads() : []) {
+        if (!pad || !pad.connected) continue;
+        const pressed = currentPressed(pad);
+        if (!pressed.size) continue;
+        prevButtons.set(pad.index, pressed);
+        const fn = probe;
+        probe = null;
+        fn();
+        break;
+      }
+    }
     requestAnimationFrame(poll);
     return;
   }

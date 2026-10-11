@@ -52,6 +52,32 @@ function syncDim() {
 }
 
 /** Simple focus list used by menus, dialogs and settings. */
+/**
+ * PS5 list move: a soft curved band of light sweeps across the newly
+ * selected row in the direction of travel (down or up). Only for moves within
+ * vertical lists; carousels and button rows don't get it.
+ */
+function wave(prev, cur) {
+  if (!prev || !cur || document.body.classList.contains('reduce-motion')) return;
+  const a = prev.getBoundingClientRect();
+  const b = cur.getBoundingClientRect();
+  const dy = b.top - a.top;
+  if (Math.abs(dy) < Math.abs(b.left - a.left) || Math.abs(dy) < 4) return;
+  let w = cur.querySelector(':scope > .fx-wave');
+  if (!w) {
+    w = document.createElement('span');
+    w.className = 'fx-wave';
+    cur.append(w);
+  }
+  w.classList.remove('run', 'up', 'down');
+  void w.offsetWidth;
+  w.classList.add('run', dy > 0 ? 'down' : 'up');
+  // Drop it once it has played: a view that is hidden and shown again would
+  // otherwise replay every wave still attached to its items.
+  clearTimeout(w._done);
+  w._done = setTimeout(() => w.remove(), 300);
+}
+
 export class FocusList {
   constructor(els = [], { index = 0, onChange = null, wrap = false } = {}) {
     this.els = els;
@@ -92,7 +118,10 @@ export class FocusList {
       i += Math.sign(delta);
       if (i < 0 || i >= this.els.length) return false;
     }
-    return this.set(i);
+    const prev = this.current;
+    if (!this.set(i)) return false;
+    wave(prev, this.current);
+    return true;
   }
 
   blur() {

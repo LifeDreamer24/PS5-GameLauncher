@@ -11,6 +11,7 @@ const { SystemBridge } = require('./system');
 const { DiscordBridge } = require('./discord');
 const { OverlayManager } = require('./overlay');
 const { GameMonitor } = require('./gamemonitor');
+const { SoundPacks } = require('./soundpacks');
 
 const DEFAULT_SETTINGS = {
   // Library
@@ -53,6 +54,25 @@ const DEFAULT_SETTINGS = {
   qmHidden: [],
   restoreOnExit: true,
   welcomeScreen: true,
+  // Controller passthrough: games get a virtual DualSense (needs HidHide + VIIPER)
+  controllerPassthrough: false,
+  // What the DualSense is shown to games as: dualsense | dualshock4 | xbox360
+  passthroughEmulation: 'dualsense',
+  // Interface typeface: system (Segoe UI) | sst (PlayStation's SST, from renderer/fonts/sst)
+  font: 'system',
+  // Sound themes (deckthemes.com audio packs): installed pack ids, or null for the built-in sounds
+  soundPack: null,
+  musicPack: null,
+  // Notifications
+  notifPopups: true,
+  notifPreview: true,
+  notifDuration: 'default',
+  notif_discord: 'always',
+  notif_party: 'always',
+  notif_controller: 'always',
+  notif_game: 'always',
+  notif_library: 'notInGame',
+  notif_system: 'always',
   language: 'auto',
   // Profile
   profileName: 'Player',
@@ -79,6 +99,12 @@ const MIME = {
   '.gif': 'image/gif',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.flac': 'audio/flac',
 };
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -131,6 +157,7 @@ function start() {
   const dataDir = app.getPath('userData');
   const artDir = path.join(dataDir, 'artwork');
   const avatarDir = path.join(dataDir, 'avatars');
+  const packs = new SoundPacks(path.join(dataDir, 'soundpacks'));
   const settings = new JsonStore(path.join(dataDir, 'settings.json'), DEFAULT_SETTINGS);
   const libStore = new JsonStore(path.join(dataDir, 'library.json'), { games: [], excluded: [] });
 
@@ -138,7 +165,7 @@ function start() {
   let win = null;
   let overlay = null;
   // Most state goes to both the launcher and the in-game overlay window.
-  const MAIN_ONLY = new Set(['window:state', 'notify', 'scan:progress', 'navigate']);
+  const MAIN_ONLY = new Set(['window:state', 'notify', 'scan:progress', 'navigate', 'discord:message']);
   const send = (channel, payload) => {
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
     if (!MAIN_ONLY.has(channel) && overlay) overlay.send(channel, payload);
@@ -146,7 +173,13 @@ function start() {
   const library = new Library({ store: libStore, settings, artDir, send });
   const system = new SystemBridge();
   const discord = new DiscordBridge({ file: path.join(dataDir, 'discord.json'), send });
-  overlay = new OverlayManager({ system, onVisibility: (visible) => (visible ? schedulePause() : updatePause()) });
+  overlay = new OverlayManager({
+    system,
+    onVisibility: (visible) => {
+      updatePassthroughMute();
+      return visible ? schedulePause() : updatePause();
+    },
+  });
 
   /* ---- Pausing the game while a menu is in front ------------------
      Windows has no safe way to stop a game from reading the controller, so
@@ -167,9 +200,11 @@ function start() {
     const settled = cur && age > 15000; // never pause a game that is still starting
     if (cur && !settled) pauseTimer = setTimeout(updatePause, 15000 - age + 200);
     let want = null;
-    if (settings.data.pauseGames !== false && cur && settled && cur.pid !== closingPid && !monitor.hasAntiCheat(cur.id) && (overlay.visible || launcherFront)) {
-      const g = library.find(cur.id);
-      const mode = (g && g.pauseMode) || 'auto';
+    const curGame = cur && library.find(cur.id);
+    const realPad = !!(curGame && curGame.controllerMode === 'real' && settings.data.controllerPassthrough);
+    if ((settings.data.pauseGames !== false || realPad) && cur && settled && cur.pid !== closingPid && !monitor.hasAntiCheat(cur.id) && (overlay.visible || launcherFront)) {
+      const g = curGame;
+      const mode = realPad ? 'always' : (g && g.pauseMode) || 'auto';
       if (mode === 'always') want = cur.pid;
       else if (mode === 'auto') {
         // Connected to a server? Pausing would disconnect it, so let it run.
@@ -212,6 +247,7 @@ function start() {
     onChange: (list) => {
       send('game:running', list);
       schedulePause();
+      if (settings.data.controllerPassthrough) applyPassthrough(false);
     },
     onEnded: (id, minutes) => {
       const g = library.find(id);
@@ -249,8 +285,58 @@ function start() {
   }
   system.on('guide', onGuide);
   system.on('pad', (e) => {
-    if (overlay.visible && e.action) overlay.send('pad:action', { action: e.action, repeat: !!e.repeat });
+    if (!e.action) return;
+    if (overlay.visible) overlay.send('pad:action', { action: e.action, repeat: !!e.repeat });
+    // With controller passthrough the launcher reads the real controller
+    // through the helper too (the virtual one is muted while it is in front).
+    else if ((passthrough.enabled || passthrough.fallback) && win && win.isFocused() && !win.isMinimized()) win.webContents.send('pad:action', { action: e.action, repeat: !!e.repeat });
   });
+
+  /* ---- Controller passthrough (HidHide + VIIPER) -------------------
+     Games get a virtual DualSense that the launcher feeds from the real one.
+     Whenever the launcher or the quick menu is in front it is muted, so the
+     game can't react to the menu's button presses. */
+  // fallback: passthrough just went off and the launcher window doesn't see
+  // the controller again yet, so it keeps getting it through the helper.
+  const passthrough = { enabled: false, state: null, fallback: false };
+  system.on('passthrough', (e) => {
+    passthrough.state = e.state;
+    send('passthrough:state', e.state);
+  });
+  /** A running game set to use the real controller (DualSense features): passthrough is off meanwhile. */
+  function realControllerGame() {
+    for (const r of monitor.list()) {
+      const g = library.find(r.id);
+      if (g && g.controllerMode === 'real') return g;
+    }
+    return null;
+  }
+  let passthroughWant = null;
+  async function applyPassthrough(force = true) {
+    const real = settings.data.controllerPassthrough ? realControllerGame() : null;
+    const want = !!settings.data.controllerPassthrough && !real;
+    if (!force && want === passthroughWant) return passthrough.state;
+    passthroughWant = want;
+    const args = { value: want, mode: settings.data.passthroughEmulation || 'dualsense' };
+    system.passthroughArgs = want ? args : null;
+    let st = await system.request('passthrough', args, 15000).catch((err) => ({ enabled: false, error: err.message }));
+    if (real) st = { ...st, realGame: real.name };
+    passthrough.enabled = !!(st && st.enabled);
+    passthrough.state = st;
+    system.keepPadForward(passthrough.enabled || passthrough.fallback);
+    send('passthrough:state', st);
+    lastMute = null;
+    updatePassthroughMute();
+    return st;
+  }
+  let lastMute = null;
+  function updatePassthroughMute() {
+    if (!passthrough.enabled) return;
+    const muted = !!(overlay.visible || (win && win.isFocused() && !win.isMinimized()));
+    if (muted === lastMute) return;
+    lastMute = muted;
+    system.request('passthroughMute', { value: muted }).catch(() => {});
+  }
 
   function applyHotkey() {
     globalShortcut.unregisterAll();
@@ -305,11 +391,13 @@ function start() {
     win.on('leave-full-screen', pushSoon);
     win.on('resize', pushSoon);
     win.on('blur', () => {
+      setTimeout(updatePassthroughMute, 0);
       pushState();
       schedulePause();
     });
     let lastPlaytimeRefresh = 0;
     win.on('focus', () => {
+      updatePassthroughMute();
       pushState();
       schedulePause();
       if (Date.now() - lastPlaytimeRefresh > 30000) {
@@ -349,7 +437,7 @@ function start() {
     const rendererDir = path.join(__dirname, '..', 'renderer');
     // app://ui/... -> renderer files, app://art/... -> cached artwork,
     // app://avatar/... -> profile pictures
-    const roots = { ui: rendererDir, art: artDir, avatar: avatarDir };
+    const roots = { ui: rendererDir, art: artDir, avatar: avatarDir, sounds: packs.dir };
     protocol.handle('app', async (req) => {
       const u = new URL(req.url);
       const base = roots[u.hostname] || null;
@@ -374,6 +462,8 @@ function start() {
 
     createWindow();
     system.start();
+    // Always: when it is off this also undoes hiding left over from a crash.
+    setTimeout(applyPassthrough, 1200);
     discord.start();
     overlay.create();
     monitor.start();
@@ -437,6 +527,11 @@ function start() {
     }
     if ('overlayHotkey' in patch) applyHotkey();
     if ('pauseGames' in patch) schedulePause();
+    if ('controllerPassthrough' in patch) applyPassthrough();
+    else if ('passthroughEmulation' in patch) {
+      if (system.passthroughArgs) system.passthroughArgs = { ...system.passthroughArgs, mode: settings.data.passthroughEmulation };
+      system.request('passthroughConfig', { mode: settings.data.passthroughEmulation || 'dualsense' }).catch(() => {});
+    }
 
     if ('fullscreen' in patch && win) {
       win.setFullScreen(!!patch.fullscreen);
@@ -507,7 +602,12 @@ function start() {
   });
   ipcMain.handle('library:reset', () => library.reset());
 
-  ipcMain.handle('game:update', (_e, id, patch) => library.update(id, patch || {}));
+  ipcMain.handle('game:update', (_e, id, patch) => {
+    const r = library.update(id, patch || {});
+    // Switching a running game to / from the real controller applies right away.
+    if (patch && 'controllerMode' in patch && settings.data.controllerPassthrough) applyPassthrough(false);
+    return r;
+  });
   ipcMain.handle('game:remove', (_e, id) => library.remove(id));
   ipcMain.handle('game:refreshArt', (_e, id) => {
     const g = library.find(id);
@@ -662,6 +762,43 @@ function start() {
     await showLauncher(nav);
   });
   ipcMain.handle('overlay:toggle', () => overlay.toggle({ running: monitor.list() }));
+  // Sound themes
+  ipcMain.handle('sounds:list', () => packs.list());
+  ipcMain.handle('sounds:browse', (_e, q) => packs.browse(q || {}));
+  ipcMain.handle('sounds:download', (_e, theme) => packs.download(theme));
+  ipcMain.handle('sounds:remove', async (_e, id) => {
+    await packs.remove(id);
+    const s = settings.data;
+    const patch = {};
+    if (s.soundPack === id) patch.soundPack = null;
+    if (s.musicPack === id) patch.musicPack = null;
+    if (Object.keys(patch).length) {
+      Object.assign(s, patch);
+      settings.saveNow();
+      send('settings:changed', s);
+    }
+    return true;
+  });
+  ipcMain.handle('sounds:installLocal', async (_e, kind) => {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Choose a sound pack',
+      properties: kind === 'folder' ? ['openDirectory'] : ['openFile'],
+      filters: kind === 'folder' ? [] : [{ name: 'Sound pack', extensions: ['zip'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    return packs.installLocal(r.filePaths[0]);
+  });
+
+  ipcMain.handle('pad:fallback', (_e, on) => {
+    passthrough.fallback = !!on;
+    system.keepPadForward(passthrough.enabled || passthrough.fallback);
+  });
+  ipcMain.handle('passthrough:status', () => passthrough.state || system.request('passthroughStatus', {}, 3000).catch(() => null));
+
+  ipcMain.handle('notify:popup', (_e, n) => {
+    if (!n || typeof n !== 'object') return;
+    overlay.popup({ title: String(n.title || ''), body: String(n.body || ''), icon: String(n.icon || 'bell'), image: n.image ? String(n.image) : null, duration: Math.min(15000, Number(n.duration) || 5000), kind: String(n.kind || 'system') });
+  });
   ipcMain.handle('games:running', () => monitor.list());
   async function continueGame(id) {
     const r = monitor.get(id);
@@ -696,6 +833,7 @@ function start() {
   // Media, volume and brightness (native helper)
   ipcMain.handle('sys:available', () => system.available());
   ipcMain.handle('sys:media', (_e, appId, knownKey) => system.media(appId, knownKey));
+  ipcMain.handle('sys:mediaPlaying', () => system.request('mediaPlaying', {}, 3000).catch(() => false));
   ipcMain.handle('sys:mediaCmd', (_e, appId, action, value) => system.mediaCommand(appId, action, value));
   ipcMain.handle('sys:volume', () => system.volume());
   ipcMain.handle('sys:setVolume', (_e, v) => system.setVolume(v));
@@ -720,13 +858,16 @@ function start() {
   ipcMain.handle('discord:disconnect', () => discord.disconnect());
   ipcMain.handle('discord:forget', () => discord.forget());
   ipcMain.handle('discord:cmd', (_e, name, value, extra) => discord.command(name, value, extra));
+  ipcMain.handle('discord:openChat', (_e, id) => discord.openChat(id));
+  ipcMain.handle('discord:closeChat', () => discord.closeChat());
+  ipcMain.handle('discord:openInDiscord', (_e, id, guild) => discord.openInDiscord(id, guild));
 
   ipcMain.handle('steam:search', (_e, term) => searchSteam(String(term || '')).catch(() => []));
 
   ipcMain.handle('cache:size', () => library.cacheSize());
   ipcMain.handle('app:openData', () => shell.openPath(dataDir));
   ipcMain.handle('app:openExternal', (_e, url) => {
-    if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers)\/)/.test(String(url))) {
+    if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers|github\.com\/nefarius\/HidHide|github\.com\/Alia5\/VIIPER)\/?)/.test(String(url))) {
       return shell.openExternal(url);
     }
     return null;

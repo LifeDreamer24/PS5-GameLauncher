@@ -18,6 +18,17 @@ api.on('discord:state', (s) => {
   }
 });
 
+// A new Discord message (DM or mention): a notification with the sender's picture.
+api.on('discord:message', (n) => {
+  if (!n) return;
+  pushNotification({ title: n.title || 'Discord', body: n.body || '', image: n.icon || null, icon: 'chat', kind: 'discord', channelId: n.channelId });
+});
+
+/** Recent conversations (newest first) seen since Discord connected. */
+export function conversations() {
+  return (party.state && party.state.conversations) || [];
+}
+
 export async function loadDiscord() {
   try {
     party.state = await api.discordState();

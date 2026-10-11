@@ -7,7 +7,8 @@ import { sfx } from '../sound.js';
 import { mouseActive, connectedPads, rumble } from '../input.js';
 import { mountOverlay, FocusList, topOverlay } from '../ui/overlay.js';
 import { confirmDialog, sliderDialog, optionsMenu } from '../ui/dialogs.js';
-import { party, discordCmd, discordConnect, statusText, inCall } from '../discord.js';
+import { party, discordCmd, discordConnect, statusText, inCall, conversations } from '../discord.js';
+import { openChat } from '../ui/chat.js';
 import { launchGame } from '../ui/gameactions.js';
 import { tileArt } from '../ui/tiles.js';
 import { renderHints } from '../ui/glyphs.js';
@@ -66,6 +67,13 @@ export async function pickOutputDevice(anchor) {
 // Always shown; everything else can be hidden with "Customize".
 const FIXED = new Set(['home', 'game', 'notifications', 'settings', 'power']);
 
+// Controller passthrough: what the virtual controller is.
+const EMULATION = [
+  { value: 'dualsense', label: 'DualSense', hint: 'Touchpad, motion, PlayStation buttons' },
+  { value: 'dualshock4', label: 'DualShock 4', hint: 'For games that only know PS4 controllers' },
+  { value: 'xbox360', label: 'Xbox Controller', hint: 'Xbox buttons; no touchpad or motion' },
+];
+
 function sessionText(g) {
   const since = state.runningSince[g.id];
   if (!since) return 'Playing now';
@@ -106,6 +114,7 @@ export class QuickMenu {
     on('discord', () => {
       if (!this.ctl) return;
       if (this.panelIs('party')) this.refreshParty();
+      else if (this.panelIs('messages')) this.rebuildPanel();
       else if (!this.panel && this.cardSignature() !== this.cardSig) this.renderCards(false);
       this.updatePartyIcon();
     });
@@ -119,7 +128,7 @@ export class QuickMenu {
   close() {
     if (!this.ctl) return;
     if (this.customizing) this.exitCustomize({ quiet: true });
-    sfx.close();
+    sfx.menuOut();
     // Close anything stacked above us first.
     let o = topOverlay();
     while (o && o !== this.ctl) {
@@ -143,6 +152,7 @@ export class QuickMenu {
       { id: 'library', icon: 'library', label: 'Game Library', run: () => (close(), this.router.open('library')) },
       { id: 'notifications', icon: 'bell', label: 'Notifications', panel: () => this.notificationsPanel() },
       { id: 'party', icon: 'party', label: 'Party', panel: () => this.partyPanel() },
+      { id: 'messages', icon: 'chat', label: 'Messages', panel: () => this.messagesPanel() },
       { id: 'search', icon: 'search', label: 'Search', run: () => (close(), this.router.openSearch()) },
       { id: 'music', icon: 'music', label: 'Music', panel: () => this.musicPanel(), wide: true },
       { id: 'sound', icon: 'volume', label: 'Sound', panel: () => this.soundPanel() },
@@ -407,7 +417,7 @@ export class QuickMenu {
   }
 
   open() {
-    sfx.open();
+    sfx.menuIn();
     this.zone = 'bar';
     this.panel = null;
     this.cardNav = null;
@@ -742,7 +752,7 @@ export class QuickMenu {
 
   async activateRow(r, el) {
     if (r.type === 'toggle') {
-      sfx.toggle();
+      sfx.toggle(!(typeof r.value === 'function' ? r.value() : r.value));
       await r.toggle();
       this.renderRow(el);
     } else if (r.type === 'range') {
@@ -791,7 +801,7 @@ export class QuickMenu {
       return true;
     }
     r.set(v);
-    sfx.tick();
+    sfx.slider(delta > 0);
     this.renderRow(el);
     return true;
   }
@@ -1075,16 +1085,38 @@ export class QuickMenu {
 
   accessoriesPanel() {
     const pads = connectedPads();
+    const rows = pads.map((p) => ({
+      icon: 'gamepad',
+      label: p.id.replace(/\s*\(.*\)\s*$/, '') || 'Controller',
+      sub: p.kind === 'ps' ? 'PlayStation controller' : 'Xbox / XInput controller',
+      value: `#${p.index + 1}`,
+      run: () => rumble(0.8, 260),
+    }));
+    // Controller passthrough: what games see the DualSense as.
+    if (state.settings.controllerPassthrough) {
+      const st = state.passthrough || {};
+      const label = () => (EMULATION.find((m) => m.value === (state.settings.passthroughEmulation || 'dualsense')) || EMULATION[0]).label;
+      rows.push({
+        icon: 'gamepad',
+        label: 'Emulate DualSense As',
+        sub: st.realGame ? t('Off while {name} uses the real controller', { name: st.realGame }) : 'What games see your controller as',
+        value: label,
+        run: async (el) => {
+          const cur = state.settings.passthroughEmulation || 'dualsense';
+          const choice = await optionsMenu({
+            title: 'Emulate DualSense As',
+            anchor: el,
+            index: Math.max(0, EMULATION.findIndex((m) => m.value === cur)),
+            items: EMULATION.map((m) => ({ ...m, checked: m.value === cur })),
+          });
+          if (choice && choice.value !== cur) await setSetting('passthroughEmulation', choice.value);
+        },
+      });
+    }
     return {
       title: 'Accessories',
       empty: 'No controllers connected. Press a button on your controller.',
-      rows: pads.map((p) => ({
-        icon: 'gamepad',
-        label: p.id.replace(/\s*\(.*\)\s*$/, '') || 'Controller',
-        sub: p.kind === 'ps' ? 'PlayStation controller' : 'Xbox / XInput controller',
-        value: `#${p.index + 1}`,
-        run: () => rumble(0.8, 260),
-      })),
+      rows,
     };
   }
 
@@ -1131,6 +1163,45 @@ export class QuickMenu {
         if (sys.displays === null) loadBrightness();
         loadNightLight();
       },
+    };
+  }
+
+  messagesPanel() {
+    const st = party.state;
+    const openSetup = () => {
+      this.close();
+      this.router.open('settings', { category: 'users', section: 'Discord' });
+    };
+    if (!st || st.status !== 'ready') {
+      return {
+        title: 'Messages',
+        rows: [{ icon: 'party', label: st && st.configured ? statusText(st) : 'Connect Discord', sub: 'See your Discord messages here', chevron: true, run: () => (st && st.configured ? discordConnect() : openSetup()) }],
+      };
+    }
+    if (!st.messages) {
+      return {
+        title: 'Messages',
+        rows: [{ icon: 'chat', label: 'Allow Messages', sub: 'Discord asks you to authorize the launcher once more', chevron: true, run: () => discordConnect() }],
+      };
+    }
+    const list = conversations();
+    return {
+      title: 'Messages',
+      empty: 'New Discord messages show up here.',
+      rows: list.map((c) => ({
+        icon: 'chat',
+        label: c.name,
+        sub: () => {
+          const cur = conversations().find((x) => x.channelId === c.channelId) || c;
+          return `${cur.last ? `${cur.last} · ` : ''}${timeAgo(cur.time)}`;
+        },
+        value: () => {
+          const cur = conversations().find((x) => x.channelId === c.channelId) || c;
+          return cur.unread ? String(cur.unread) : '';
+        },
+        chevron: true,
+        run: () => openChat(c),
+      })),
     };
   }
 
