@@ -43,7 +43,7 @@ function unzip(buf) {
     const raw = buf.subarray(start, start + csize);
     let data;
     if (method === 0) data = raw;
-    else if (method === 8) data = zlib.inflateRawSync(raw);
+    else if (method === 8) data = zlib.inflateRawSync(raw, { maxOutputLength: 256 * 1024 * 1024 });
     else continue;
     files.push({ name, data });
   }

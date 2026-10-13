@@ -10,9 +10,13 @@ class OverlayManager {
    * @param {object} o
    * @param {import('./system').SystemBridge} o.system
    */
-  constructor({ system, onVisibility }) {
+  constructor({ system, onVisibility, onBeforeShow, onIdle }) {
     this.system = system;
     this.onVisibility = onVisibility || (() => {});
+    // The launcher wakes up from its in-game sleep before anything shows, and
+    // may go back to sleep once nothing is on screen any more.
+    this.onBeforeShow = onBeforeShow || (() => {});
+    this.onIdle = onIdle || (() => {});
     this.win = null;
     this.visible = false;
     this.prevForeground = null;
@@ -22,6 +26,9 @@ class OverlayManager {
   create() {
     const win = new BrowserWindow({
       show: false,
+      // Otherwise a window that hasn't been shown yet counts as visible and
+      // keeps rendering frames at full speed in the background.
+      paintWhenInitiallyHidden: false,
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
@@ -40,7 +47,9 @@ class OverlayManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        backgroundThrottling: false,
+        // While hidden the page counts as hidden (no animation frames, slow
+        // timers), so it costs the game nothing; switched off while shown.
+        backgroundThrottling: true,
       },
     });
     win.setAlwaysOnTop(true, 'screen-saver');
@@ -57,6 +66,11 @@ class OverlayManager {
     });
     this.win = win;
     return win;
+  }
+
+  /** Hidden: let Chromium idle the page. Shown: full speed. */
+  awake(on) {
+    if (this.win && !this.win.isDestroyed()) this.win.webContents.setBackgroundThrottling(!on);
   }
 
   send(channel, payload) {
@@ -79,7 +93,11 @@ class OverlayManager {
    */
   async popup(n) {
     if (!this.win) this.create();
+    this.onBeforeShow();
+    this.awake(true);
     this.send('overlay:toast', n);
+    this.toastUntil = Math.max(this.toastUntil || 0, Date.now() + (n.duration || 5000) + 900);
+    // While a menu is open the toast shows in it; hideNow keeps it up after.
     if (this.visible) return;
     if (!this.toastShown) {
       const fg = await this.system.foreground();
@@ -90,17 +108,30 @@ class OverlayManager {
       this.win.setAlwaysOnTop(true, 'screen-saver');
       this.toastShown = true;
     }
+    this.holdForToasts();
+  }
+
+  /** Keep the (click-through) window up until the last toast is gone. */
+  holdForToasts() {
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       this.toastShown = false;
-      if (!this.visible && this.win) this.win.hide();
+      if (!this.visible && this.win) {
+        this.win.hide();
+        this.awake(false);
+      }
       if (this.win) this.win.setIgnoreMouseEvents(false);
-    }, (n.duration || 5000) + 900);
+      if (!this.visible) this.onIdle();
+    }, Math.max(0, (this.toastUntil || 0) - Date.now()));
   }
 
   async show(info = {}) {
     if (!this.win) this.create();
     if (this.visible) return;
+    // 'menu' (quick menu) or 'capture' (capture menu, never pauses the game)
+    this.mode = info.mode || 'menu';
+    this.onBeforeShow();
+    this.awake(true);
     clearTimeout(this.hideTimer);
     clearTimeout(this.toastTimer);
     this.toastShown = false;
@@ -147,7 +178,17 @@ class OverlayManager {
     this.visible = false;
     clearInterval(this.focusTimer);
     this.system.setPadForward(false);
-    this.win.hide();
+    if ((this.toastUntil || 0) > Date.now()) {
+      // A notification arrived while the menu was open (e.g. "Screenshot
+      // saved" right after the capture menu closed): leave it on screen,
+      // click-through, until it ends.
+      this.win.setIgnoreMouseEvents(true);
+      this.toastShown = true;
+      this.holdForToasts();
+    } else {
+      this.win.hide();
+      this.awake(false);
+    }
     // Resume a paused game before it gets focus back.
     await this.onVisibility(false);
     if (restoreFocus && this.prevForeground) await this.system.focusWindow(this.prevForeground);

@@ -42,7 +42,8 @@ export class HomeView {
       this.hub.tickNowPlaying();
       if (this.active && this.items[this.sel]?.type === 'nowplaying') this.updateHero();
     });
-    setInterval(() => this.active && this.tab === 'media' && this.hub.tickNowPlaying(), 500);
+    setInterval(() => this.active && this.tab === 'media' && !state.asleep && this.hub.tickNowPlaying(), 500);
+    on('sleep', () => this.syncMediaWatch());
     on('running', () => this.refresh());
     on('settings', (k) => {
       if (k === null || ['homeCount', 'homeSort', 'showStore', 'tileStyle', 'profileName', 'avatar'].includes(k)) this.refresh(true);
@@ -540,7 +541,7 @@ export class HomeView {
   /* ---------------------------------------------------------------- */
 
   syncMediaWatch() {
-    const want = this.active && this.tab === 'media';
+    const want = this.active && this.tab === 'media' && !state.asleep;
     if (want && !this.unwatch) this.unwatch = watchMedia();
     if (!want && this.unwatch) {
       this.unwatch();

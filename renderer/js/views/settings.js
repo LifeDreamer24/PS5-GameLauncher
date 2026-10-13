@@ -34,6 +34,7 @@ export class SettingsView {
     on('outputs', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
     on('soundpacks', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
     on('passthrough', () => this.active && this.cat && this.cat.id === 'system' && rerender());
+    on('capture-state', () => this.active && this.cat && this.cat.id === 'captures' && rerender());
     on('brightness', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('nightlight', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('bluetooth', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());

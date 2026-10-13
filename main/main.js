@@ -12,6 +12,7 @@ const { DiscordBridge } = require('./discord');
 const { OverlayManager } = require('./overlay');
 const { GameMonitor } = require('./gamemonitor');
 const { SoundPacks } = require('./soundpacks');
+const { ObsBridge } = require('./obs');
 
 const DEFAULT_SETTINGS = {
   // Library
@@ -73,6 +74,21 @@ const DEFAULT_SETTINGS = {
   notif_game: 'always',
   notif_library: 'notInGame',
   notif_system: 'always',
+  notif_capture: 'always',
+  // Captures (recording through OBS Studio, see main/obs.js)
+  captureEnabled: false,
+  captureDir: '', // '' = Videos\PS5 Game Launcher
+  captureClipLength: 60, // seconds kept for "Save Recent Gameplay"
+  captureResolution: 1080, // output height; 0 = same as the screen
+  captureFps: 60,
+  captureEncoder: 'auto', // auto | nvenc | amd | qsv | x264
+  captureQuality: 'high', // standard (bitrate) | high | best
+  captureBitrate: 20000, // kbps, for "standard"
+  captureFormat: 'mp4', // mp4 | mkv
+  captureShotFormat: 'png', // png | jpg
+  captureMic: false,
+  captureGameAudioOnly: true,
+  captureCreateButton: true, // DualSense Create button opens the capture menu
   language: 'auto',
   // Profile
   profileName: 'Player',
@@ -173,13 +189,46 @@ function start() {
   const library = new Library({ store: libStore, settings, artDir, send });
   const system = new SystemBridge();
   const discord = new DiscordBridge({ file: path.join(dataDir, 'discord.json'), send });
+  const obs = new ObsBridge({ dataDir, settings, send, system, defaultDir: () => path.join(app.getPath('videos'), 'PS5 Game Launcher') });
   overlay = new OverlayManager({
     system,
     onVisibility: (visible) => {
       updatePassthroughMute();
+      updateSleep();
       return visible ? schedulePause() : updatePause();
     },
+    onBeforeShow: () => setSleep(false),
+    onIdle: () => updateSleep(),
   });
+
+  /* ---- In game: the launcher steps aside --------------------------
+     While a game is in front (launcher minimized or behind it, no menu or
+     notification over the game) the launcher's renderer, GPU and service
+     processes run in Windows' efficiency mode at a lower priority, all of
+     its memory is trimmed, and both pages drop their audio output and
+     polling. It all comes back the moment the launcher, a menu or a
+     notification needs it (setSleep(false) runs before anything shows). */
+  let asleep = false;
+  let sleepTimer = null;
+  const launcherInFront = () => !!(win && win.isVisible() && !win.isMinimized() && win.isFocused());
+  function updateSleep() {
+    clearTimeout(sleepTimer);
+    const idle = monitor.list().length > 0 && !launcherInFront() && !overlay.visible && !overlay.toastShown;
+    if (!idle) return setSleep(false);
+    // Give the game a moment to take over (and the launcher to minimize) first.
+    sleepTimer = setTimeout(() => setSleep(true), 5000);
+  }
+  function setSleep(on) {
+    if (!on) clearTimeout(sleepTimer);
+    if (on === asleep) return;
+    asleep = on;
+    const metrics = app.getAppMetrics();
+    const helpers = metrics.filter((m) => m.type !== 'Browser').map((m) => m.pid);
+    system.request('procQos', { pids: helpers, eco: on, lower: on, trim: on }).catch(() => {});
+    // The main process keeps its priority (it reacts to the PS button); only its memory is trimmed.
+    if (on) system.request('procQos', { pids: [process.pid], eco: false, trim: true }).catch(() => {});
+    send('app:sleep', on);
+  }
 
   /* ---- Pausing the game while a menu is in front ------------------
      Windows has no safe way to stop a game from reading the controller, so
@@ -202,7 +251,9 @@ function start() {
     let want = null;
     const curGame = cur && library.find(cur.id);
     const realPad = !!(curGame && curGame.controllerMode === 'real' && settings.data.controllerPassthrough);
-    if ((settings.data.pauseGames !== false || realPad) && cur && settled && cur.pid !== closingPid && !monitor.hasAntiCheat(cur.id) && (overlay.visible || launcherFront)) {
+    // The capture menu never pauses the game (clips must keep recording).
+    const menuOpen = overlay.visible && overlay.mode !== 'capture';
+    if ((settings.data.pauseGames !== false || realPad) && cur && settled && cur.pid !== closingPid && !monitor.hasAntiCheat(cur.id) && (menuOpen || launcherFront)) {
       const g = curGame;
       const mode = realPad ? 'always' : (g && g.pauseMode) || 'auto';
       if (mode === 'always') want = cur.pid;
@@ -247,9 +298,18 @@ function start() {
     onChange: (list) => {
       send('game:running', list);
       schedulePause();
+      updateSleep();
       if (settings.data.controllerPassthrough) applyPassthrough(false);
+      // Recording follows the game: OBS's replay buffer runs while one is open.
+      obs.onRunning(list, (id) => library.find(id)).catch(() => {});
     },
     onEnded: (id, minutes) => {
+      // It quit while still starting: stop keeping the launcher on top for it. The
+      // watch itself goes on for a moment, in case a launcher process handed over.
+      if (launchWatchId === id) {
+        launchEndedAt = Date.now();
+        setCover(false);
+      }
       const g = library.find(id);
       if (g && minutes > 0) {
         g.playtime = (g.playtime || 0) + minutes;
@@ -284,6 +344,33 @@ function start() {
     overlay.show({ running: monitor.list() });
   }
   system.on('guide', onGuide);
+
+  /* ---- Captures: the Create button opens the capture menu ----------
+     A bar over the game (Save Recent Gameplay, Take Screenshot, Start
+     Recording…). Unlike the quick menu it never pauses the game. */
+  let lastShare = 0;
+  function onShare() {
+    const now = Date.now();
+    if (now - lastShare < 300) return;
+    lastShare = now;
+    if (!settings.data.captureEnabled) return;
+    if (overlay.visible) {
+      if (overlay.mode === 'capture') overlay.requestClose();
+      return;
+    }
+    if (!monitor.list().length) return; // only games are captured
+    overlay.show({ mode: 'capture', running: monitor.list(), capture: obs.publicState() });
+  }
+  system.on('share', () => {
+    if (settings.data.captureCreateButton !== false) onShare();
+  });
+  // While recording is on, the Create button belongs to the capture menu
+  // (the virtual controller of controller passthrough doesn't pass it on).
+  const applyCaptureButton = () => {
+    // Remembered so a restarted helper gets it again.
+    system.captureButton = !!settings.data.captureEnabled && settings.data.captureCreateButton !== false;
+    return system.request('captureButton', { value: system.captureButton }).catch(() => {});
+  };
   system.on('pad', (e) => {
     if (!e.action) return;
     if (overlay.visible) overlay.send('pad:action', { action: e.action, repeat: !!e.repeat });
@@ -343,6 +430,7 @@ function start() {
     if (settings.data.overlayHotkey !== false) {
       try {
         globalShortcut.register('Control+Alt+Home', onGuide);
+        globalShortcut.register('Control+Alt+End', onShare);
       } catch {}
     }
   }
@@ -394,9 +482,13 @@ function start() {
       setTimeout(updatePassthroughMute, 0);
       pushState();
       schedulePause();
+      updateSleep();
     });
+    win.on('minimize', updateSleep);
+    win.on('restore', updateSleep);
     let lastPlaytimeRefresh = 0;
     win.on('focus', () => {
+      setSleep(false);
       updatePassthroughMute();
       pushState();
       schedulePause();
@@ -437,24 +529,30 @@ function start() {
     const rendererDir = path.join(__dirname, '..', 'renderer');
     // app://ui/... -> renderer files, app://art/... -> cached artwork,
     // app://avatar/... -> profile pictures
+    // app://captures/... -> clips and screenshots, app://capthumbs/... -> their thumbnails
     const roots = { ui: rendererDir, art: artDir, avatar: avatarDir, sounds: packs.dir };
+    const rootOf = (host) => (host === 'captures' ? obs.dir : host === 'capthumbs' ? obs.thumbDir : roots[host]);
     protocol.handle('app', async (req) => {
       const u = new URL(req.url);
-      const base = roots[u.hostname] || null;
+      const base = rootOf(u.hostname) || null;
       if (!base) return new Response('not found', { status: 404 });
       const rel = decodeURIComponent(u.pathname).replace(/^\/+/, '') || 'index.html';
       const file = path.normalize(path.join(base, rel));
-      if (!file.startsWith(base + path.sep)) return new Response('forbidden', { status: 403 });
+      // Inside the root (also when the root is a drive like D:\).
+      const inside = path.relative(base, file);
+      if (!inside || inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) return new Response('forbidden', { status: 403 });
       try {
-        const res = await net.fetch(pathToFileURL(file).toString());
-        return new Response(res.body, {
-          status: res.status,
-          headers: {
-            'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
-            'access-control-allow-origin': '*',
-            'cache-control': u.hostname === 'ui' ? 'no-cache' : 'max-age=31536000',
-          },
-        });
+        // Range requests pass through, so videos can seek.
+        const range = req.headers.get('range');
+        const res = await net.fetch(pathToFileURL(file).toString(), range ? { headers: { range } } : undefined);
+        const headers = {
+          'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+          'access-control-allow-origin': '*',
+          'cache-control': u.hostname === 'ui' || u.hostname === 'captures' ? 'no-cache' : 'max-age=31536000',
+          'accept-ranges': 'bytes',
+        };
+        for (const k of ['content-range', 'content-length']) if (res.headers.get(k)) headers[k] = res.headers.get(k);
+        return new Response(res.body, { status: res.status, headers });
       } catch {
         return new Response('not found', { status: 404 });
       }
@@ -468,6 +566,8 @@ function start() {
     overlay.create();
     monitor.start();
     applyHotkey();
+    applyCaptureButton();
+    obs.onSettings().catch(() => {});
 
     if (settings.data.rescanOnStartup || libStore.data.games.length === 0) {
       setTimeout(() => library.scan({ silent: true }).then(() => library.refreshSteamPlaytime()).catch(console.error), 1800);
@@ -479,8 +579,15 @@ function start() {
 
   app.on('will-quit', () => globalShortcut.unregisterAll());
 
-  app.on('before-quit', () => {
+  let obsClosed = false;
+  app.on('before-quit', (e) => {
     if (pausedPid) system.request('resume', { pid: pausedPid }).catch(() => {});
+    // Close OBS cleanly first (it was started by the launcher, in the tray).
+    if (!obsClosed && obs.ws) {
+      e.preventDefault();
+      obsClosed = true;
+      obs.shutdown().finally(() => app.quit());
+    }
   });
 
   app.on('window-all-closed', () => {
@@ -527,6 +634,10 @@ function start() {
     }
     if ('overlayHotkey' in patch) applyHotkey();
     if ('pauseGames' in patch) schedulePause();
+    if (Object.keys(patch).some((k) => k.startsWith('capture'))) {
+      obs.onSettings().catch(() => {});
+      applyCaptureButton();
+    }
     if ('controllerPassthrough' in patch) applyPassthrough();
     else if ('passthroughEmulation' in patch) {
       if (system.passthroughArgs) system.passthroughArgs = { ...system.passthroughArgs, mode: settings.data.passthroughEmulation };
@@ -683,6 +794,8 @@ function start() {
      on top, so the anti-cheat splash opens behind it and is never seen. */
   const BOOTSTRAP = /easyanticheat|^eac|eac_|_eac|start_protected_game|eaanticheat|anticheat|battleye|_be$|^be(service|_)|gamelaunchhelper|crashreport|splash/i;
   let launchWatch = 0;
+  let launchWatchId = null; // the game being watched
+  let launchEndedAt = 0; // it exited while still starting (a crash, or a launcher process handing over)
   let coverOn = false;
   function setCover(on) {
     if (!win || win.isDestroyed() || on === coverOn) return;
@@ -695,12 +808,15 @@ function start() {
   }
   function stopWatch() {
     launchWatch++;
+    launchWatchId = null;
     setCover(false);
   }
   ipcMain.handle('game:launchCancel', () => stopWatch());
 
   function whenGameShows(id, then) {
     const token = ++launchWatch;
+    launchWatchId = id;
+    launchEndedAt = 0;
     const t0 = Date.now();
     const g = library.find(id) || {};
     const exe = g.exe || (g.launch && g.launch.type === 'exe' ? g.launch.target : null);
@@ -722,6 +838,7 @@ function start() {
       if (token !== launchWatch || !win || win.isDestroyed()) return;
       const now = Date.now();
       if (now - t0 > 180000) return finish(true); // never showed up: leave the launcher alone
+      if (launchEndedAt && !monitor.get(id) && now - launchEndedAt > 15000) return finish(true); // it quit and didn't come back
       if (now - t0 > 90000) setCover(false);
       const focused = win.isFocused() && !win.isMinimized();
       awaySince = focused ? 0 : awaySince || now;
@@ -795,6 +912,58 @@ function start() {
   });
   ipcMain.handle('passthrough:status', () => passthrough.state || system.request('passthroughStatus', {}, 3000).catch(() => null));
 
+  /* Captures (OBS) */
+  const captureNote = (n) => send('notify', { icon: 'camera', kind: 'capture', ...n });
+  const captureLength = (s) => {
+    const n = Math.round(Number(s) || 0);
+    const m = Math.floor(n / 60);
+    return m ? `${m} min${n % 60 ? ` ${n % 60} s` : ''}` : `${n} s`;
+  };
+  const captureError = (title, err) => captureNote({ title, body: String((err && err.message) || err), icon: 'info' });
+  ipcMain.handle('capture:state', () => obs.publicState());
+  ipcMain.handle('capture:list', () => obs.list());
+  ipcMain.handle('capture:delete', (_e, file) => obs.remove(file));
+  ipcMain.handle('capture:reveal', (_e, file) => shell.showItemInFolder(path.join(obs.dir, path.basename(String(file || '')))));
+  ipcMain.handle('capture:openFolder', async () => {
+    await fs.promises.mkdir(obs.dir, { recursive: true }).catch(() => {});
+    return shell.openPath(obs.dir);
+  });
+  ipcMain.handle('capture:pickDir', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Choose where captures are saved', defaultPath: obs.dir, properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    settings.data.captureDir = r.filePaths[0];
+    settings.saveNow();
+    send('settings:changed', settings.data);
+    obs.onSettings().catch(() => {});
+    return r.filePaths[0];
+  });
+  ipcMain.handle('capture:open', () => onShare());
+  ipcMain.handle('capture:action', async (_e, kind) => {
+    const game = obs.game ? obs.game.name : '';
+    try {
+      if (kind === 'clip') {
+        const c = await obs.saveClip();
+        captureNote({ title: 'Recent gameplay saved', body: c.seconds ? `${game} · ${captureLength(c.seconds)}` : game, image: c.thumbUrl, icon: 'clipRecent' });
+        return c;
+      }
+      if (kind === 'screenshot') {
+        const c = await obs.screenshot();
+        captureNote({ title: 'Screenshot saved', body: game, image: c.url, icon: 'camera' });
+        return c;
+      }
+      if (kind === 'record') {
+        const r = await obs.toggleRecording();
+        if (r.started) captureNote({ title: 'Recording started', body: game, icon: 'record' });
+        else captureNote({ title: 'Recording saved', body: r.capture && r.capture.seconds ? `${game} · ${captureLength(r.capture.seconds)}` : game, image: r.capture && r.capture.thumbUrl, icon: 'record' });
+        return r;
+      }
+    } catch (err) {
+      captureError(kind === 'clip' ? "Couldn't save the clip" : kind === 'screenshot' ? "Couldn't take the screenshot" : "Couldn't record", err);
+      throw err;
+    }
+    return null;
+  });
+
   ipcMain.handle('notify:popup', (_e, n) => {
     if (!n || typeof n !== 'object') return;
     overlay.popup({ title: String(n.title || ''), body: String(n.body || ''), icon: String(n.icon || 'bell'), image: n.image ? String(n.image) : null, duration: Math.min(15000, Number(n.duration) || 5000), kind: String(n.kind || 'system') });
@@ -867,7 +1036,7 @@ function start() {
   ipcMain.handle('cache:size', () => library.cacheSize());
   ipcMain.handle('app:openData', () => shell.openPath(dataDir));
   ipcMain.handle('app:openExternal', (_e, url) => {
-    if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers|github\.com\/nefarius\/HidHide|github\.com\/Alia5\/VIIPER)\/?)/.test(String(url))) {
+    if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers|github\.com\/nefarius\/HidHide|github\.com\/Alia5\/VIIPER|obsproject\.com)\/?)/.test(String(url))) {
       return shell.openExternal(url);
     }
     return null;

@@ -63,7 +63,17 @@ export async function loadState() {
     emit('window', w);
   });
   api.on('notify', (n) => pushNotification(n));
+  // Recording / clips (OBS): state for the capture menu and Settings › Captures.
+  api.on('capture:state', (s) => {
+    state.capture = s;
+    emit('capture-state', s);
+  });
   api.on('game:exited', (e) => emit('game-exited', e));
+  // A game is in front and nothing of ours is on screen: drop audio output and polling.
+  api.on('app:sleep', (on) => {
+    state.asleep = !!on;
+    emit('sleep', state.asleep);
+  });
 }
 
 function setRunning(list) {
@@ -96,7 +106,7 @@ export async function setSetting(key, value) {
 }
 
 /** Notification kinds, for Settings › Notifications. */
-export const NOTIFICATION_KINDS = ['discord', 'party', 'controller', 'game', 'library', 'system'];
+export const NOTIFICATION_KINDS = ['discord', 'party', 'controller', 'game', 'capture', 'library', 'system'];
 
 function kindOf(n) {
   if (n.kind) return n.kind;

@@ -6,6 +6,7 @@ import { confirmDialog, optionsMenu } from '../ui/dialogs.js';
 import { AVATARS } from '../ui/avatar.js';
 import { guideCategory } from './guide.js';
 import { openSoundStore } from './soundstore.js';
+import { openGallery } from './gallery.js';
 import { emit, on } from '../state.js';
 import { LANGUAGES } from '../i18n.js';
 import { activeProfileId, pickProfileImage, updateProfile } from '../profiles.js';
@@ -349,9 +350,151 @@ const NOTIFY_KINDS = [
   { id: 'party', label: 'Party and Voice Chat', icon: 'mic' },
   { id: 'controller', label: 'Controllers', icon: 'gamepad' },
   { id: 'game', label: 'Game Sessions', icon: 'play' },
+  { id: 'capture', label: 'Captures', icon: 'camera' },
   { id: 'library', label: 'Library and Artwork', icon: 'library' },
   { id: 'system', label: 'System', icon: 'settings' },
 ];
+
+/* Captures (recording through OBS) ---------------------------------- */
+function captureStatus() {
+  const c = state.capture;
+  if (!c) return { value: 'Checking…', cls: '' };
+  if (c.installed === false) return { value: 'OBS Studio is not installed', cls: '' };
+  if (!state.settings.captureEnabled) return { value: 'Off', cls: '' };
+  if (c.status === 'starting') return { value: 'Starting OBS…', cls: 'busy' };
+  if (c.status === 'ready') return { value: c.replay ? t('Keeping the last {n}', { n: lengthLabel(state.settings.captureClipLength) }) : 'Ready', cls: 'ok' };
+  if (c.status === 'idle' || c.status === 'off') return { value: 'Starts with your next game', cls: '' };
+  return { value: c.error || 'Not available', cls: '' };
+}
+
+function lengthLabel(s) {
+  s = Number(s) || 60;
+  return s >= 60 ? t(s === 60 ? '1 minute' : '{n} minutes', { n: s / 60 }) : t('{n} seconds', { n: s });
+}
+
+const loadCapture = () =>
+  api
+    .captureState()
+    .then((s) => {
+      state.capture = s;
+      emit('capture-state', s);
+    })
+    .catch(() => {});
+
+function capturesCategory() {
+  return {
+    id: 'captures',
+    label: 'Captures',
+    icon: 'fCaptures',
+    desc: 'Clips, screenshots and recordings with OBS',
+    sections: [
+      {
+        label: 'Recording',
+        onEnter: loadCapture,
+        items: () => {
+          const st = captureStatus();
+          const items = [
+            onOff('captureEnabled', 'Record Gameplay', 'OBS Studio runs silently in the background while you play and keeps the last moments ready to save.'),
+            { type: 'info', label: 'OBS Studio', value: st.value, valueClass: st.cls },
+          ];
+          if (state.capture && state.capture.installed === false) {
+            items.push({ type: 'action', icon: 'external', label: 'Download OBS Studio', run: () => api.openExternal('https://obsproject.com/download') });
+          }
+          items.push(
+            {
+              type: 'choice',
+              key: 'captureClipLength',
+              label: 'Recent Gameplay Length',
+              options: [15, 30, 60, 180, 300, 600].map((v) => ({ value: v, label: lengthLabel(v) })),
+            },
+            onOff('captureCreateButton', 'Create Button Opens Capture Menu'),
+            { type: 'action', icon: 'gallery', label: 'Open Media Gallery', run: () => openGallery() },
+            {
+              type: 'note',
+              label: 'Press the Create button (or Ctrl+Alt+End) in a game to save recent gameplay, take a screenshot or start a recording. The game keeps running. The launcher uses its own OBS profile and scene collection, so your own OBS setup stays as it is. Longer recent gameplay uses more memory.',
+            }
+          );
+          return items;
+        },
+      },
+      {
+        label: 'Video',
+        items: () => [
+          {
+            type: 'choice',
+            key: 'captureResolution',
+            label: 'Resolution',
+            options: [
+              { value: 0, label: 'Same as Screen' },
+              { value: 2160, label: '2160p (4K)' },
+              { value: 1440, label: '1440p' },
+              { value: 1080, label: '1080p' },
+              { value: 720, label: '720p' },
+            ],
+          },
+          { type: 'choice', key: 'captureFps', label: 'Frame Rate', options: [30, 60, 120].map((v) => ({ value: v, label: t('{n} fps', { n: v }) })) },
+        ],
+      },
+      {
+        label: 'Encoder and Quality',
+        items: () => {
+          const items = [
+            {
+              type: 'choice',
+              key: 'captureEncoder',
+              label: 'Encoder',
+              options: [
+                { value: 'auto', label: 'Automatic' },
+                { value: 'nvenc', label: 'NVIDIA NVENC' },
+                { value: 'amd', label: 'AMD' },
+                { value: 'qsv', label: 'Intel Quick Sync' },
+                { value: 'x264', label: 'Software (x264)' },
+              ],
+            },
+            {
+              type: 'choice',
+              key: 'captureQuality',
+              label: 'Quality',
+              options: [
+                { value: 'standard', label: 'Standard (set bitrate)' },
+                { value: 'high', label: 'High' },
+                { value: 'best', label: 'Very High' },
+              ],
+            },
+          ];
+          if (state.settings.captureQuality === 'standard') {
+            items.push({ type: 'choice', key: 'captureBitrate', label: 'Bitrate', options: [10000, 20000, 40000, 60000].map((v) => ({ value: v, label: t('{n} Mbps', { n: v / 1000 }) })) });
+          }
+          items.push(
+            { type: 'choice', key: 'captureFormat', label: 'Video Format', options: [{ value: 'mp4', label: 'MP4' }, { value: 'mkv', label: 'MKV' }] },
+            { type: 'note', label: 'Automatic picks your graphics card’s hardware encoder. Changes apply when nothing is recording.' }
+          );
+          return items;
+        },
+      },
+      {
+        label: 'Audio',
+        items: () => [
+          onOff('captureGameAudioOnly', 'Game Audio Only', 'Off: everything you hear on the PC is recorded (music, voice chat…).'),
+          onOff('captureMic', 'Include Microphone'),
+        ],
+      },
+      {
+        label: 'Screenshots',
+        items: () => [{ type: 'choice', key: 'captureShotFormat', label: 'Screenshot Format', options: [{ value: 'png', label: 'PNG' }, { value: 'jpg', label: 'JPG' }] }],
+      },
+      {
+        label: 'Save Location',
+        onEnter: loadCapture,
+        items: () => [
+          { type: 'info', label: 'Folder', value: (state.capture && state.capture.dir) || '…' },
+          { type: 'action', icon: 'folder', label: 'Change Folder…', run: () => api.capturePickDir().then(loadCapture) },
+          { type: 'action', icon: 'external', label: 'Open Folder', run: () => api.captureOpenFolder() },
+        ],
+      },
+    ],
+  };
+}
 
 function notificationsCategory() {
   return {
@@ -573,6 +716,7 @@ export function buildSchema(router) {
         { label: 'Menu Music', items: () => packChoiceItems('music'), onEnter: () => loadPacks() },
       ],
     },
+    capturesCategory(),
     {
       id: 'screen',
       label: 'Screen and Video',
@@ -869,6 +1013,6 @@ export function buildSchema(router) {
     },
   ];
   // Same order as the console's settings list.
-  const order = ['guide', 'library', 'home', 'notifications', 'users', 'system', 'storage', 'sound', 'screen', 'bluetooth', 'accessories', 'about'];
+  const order = ['guide', 'library', 'home', 'notifications', 'users', 'system', 'storage', 'sound', 'screen', 'bluetooth', 'accessories', 'captures', 'about'];
   return order.map((id) => cats.find((c) => c.id === id)).filter(Boolean);
 }

@@ -73,7 +73,7 @@ export function guideCategory(router) {
           { type: 'header', label: 'Stop games reacting to the controller while a menu is open' },
           { type: 'note', label: 'Many games keep reading the controller while the quick menu is open. The launcher can give games a virtual DualSense instead of the real one and silence it while a menu is in front. This needs two free, signed drivers. It works with PlayStation 5 controllers.' },
           step(1, 'Install HidHide (button below, take the newest HidHide_x64.exe) and restart the PC if it asks. HidHide hides your real controller from games.'),
-          step(2, 'Install VIIPER (button below, take viiper-windows-x64.exe and choose Install). Let it start with Windows. It also installs usbip-win2 if needed. VIIPER creates the virtual controller.'),
+          step(2, 'Install VIIPER (button below, take viiper-windows-amd64.exe and choose Install). Let it start with Windows. It also installs usbip-win2 if needed. VIIPER creates the virtual controller.'),
           step(3, 'In the launcher, open Settings › System › In-Game Overlay and turn on Block Controller in Games While Menus Are Open. The status line should say 1 controller.'),
           step(4, 'Your DualSense briefly disconnects and reconnects by itself, so programs like Steam that already had it open switch to the virtual one. If a game still reacts to it while a menu is open, turn the controller off and on once.'),
           step(5, 'In games, the controller now works as usual, and the quick menu no longer moves you around in the game. Rumble, the lightbar and the player lights still work. Adaptive triggers and the DualSense speaker do not pass through.'),

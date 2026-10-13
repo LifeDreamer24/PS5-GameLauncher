@@ -12,6 +12,7 @@ import { SettingsView } from './views/settings.js';
 import { HubView } from './views/hub.js';
 import { QuickMenu } from './views/quickmenu.js';
 import { openSearch } from './views/search.js';
+import { openGallery } from './views/gallery.js';
 import { runBoot } from './views/boot.js';
 import { loadDiscord } from './discord.js';
 import { setLanguage, t, language } from './i18n.js';
@@ -236,6 +237,8 @@ async function main() {
 
   on('settings', applySettings);
   on('window', applyWindow);
+  // In-game sleep: close the audio output (the next sound opens a fresh one).
+  on('sleep', (asleep) => asleep && resetAudio());
   on('clock', updateClocks);
   setInterval(updateClocks, 5000);
 
@@ -285,6 +288,9 @@ async function main() {
     else if (nav.view === 'search') {
       router.home();
       router.openSearch();
+    } else if (nav.view === 'gallery') {
+      router.home();
+      openGallery();
     } else router.open(nav.view, nav.params || {});
   });
 

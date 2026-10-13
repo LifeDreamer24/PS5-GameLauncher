@@ -34,6 +34,14 @@ contextBridge.exposeInMainWorld('api', {
   overlayToggle: invoke('overlay:toggle'),
   popupInGame: invoke('notify:popup'),
   passthroughStatus: invoke('passthrough:status'),
+  captureState: invoke('capture:state'),
+  captureList: invoke('capture:list'),
+  captureAction: invoke('capture:action'),
+  captureDelete: invoke('capture:delete'),
+  captureReveal: invoke('capture:reveal'),
+  captureOpenFolder: invoke('capture:openFolder'),
+  capturePickDir: invoke('capture:pickDir'),
+  captureOpen: invoke('capture:open'),
   padFallback: invoke('pad:fallback'),
   soundPacks: invoke('sounds:list'),
   browseSoundPacks: invoke('sounds:browse'),
@@ -81,7 +89,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'capture:state', 'app:sleep'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

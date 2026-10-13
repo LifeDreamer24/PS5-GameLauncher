@@ -13,7 +13,7 @@ export function toast({ title, body = '', icon: ic = 'bell', image = null, durat
   const el = h('div', {
     class: 'toast',
     html: `
-      <div class="toast-icon">${image ? `<img src="${image}" alt="">` : icon(ic)}</div>
+      <div class="toast-icon">${image ? `<img src="${escapeHtml(image)}" alt="">` : icon(ic)}</div>
       <div class="toast-text">
         <div class="toast-title">${escapeHtml(t(title))}</div>
         ${body ? `<div class="toast-body">${escapeHtml(t(body))}</div>` : ''}

@@ -183,6 +183,7 @@ namespace PS5GameLauncher
                 case "passthroughConfig": return Passthrough.Configure(Str(req, "mode"));
                 case "passthroughMute": return Passthrough.SetMuted(Bool(req, "value"));
                 case "passthroughStatus": return Passthrough.Status();
+                case "captureButton": Passthrough.StripCreate = Bool(req, "value"); return true;
                 case "launch": return Launch(Str(req, "file"), Str(req, "args"), Str(req, "cwd"));
                 case "windowTitles": return GameWin.Titles(Int(req, "pid", 0));
                 case "focusProc": return GameWin.Focus(Int(req, "pid", 0));
@@ -190,6 +191,9 @@ namespace PS5GameLauncher
                 case "resume": if (Bool(req, "wait")) Pad.WaitIdle(1500); return GameWin.Suspend(Int(req, "pid", 0), false);
                 case "resumeAll": GameWin.ResumeAll(); return true;
                 case "netConns": return Net.Established(Int(req, "pid", 0));
+                case "procQos":
+                    var pids = req.ContainsKey("pids") && req["pids"] is System.Collections.ArrayList ? ((System.Collections.ArrayList)req["pids"]).Cast<object>().Select(o => Convert.ToInt32(o)) : Enumerable.Empty<int>();
+                    return Qos.Apply(pids, Bool(req, "eco"), Bool(req, "lower"), Bool(req, "trim"));
                 default: throw new ArgumentException("unknown command");
             }
         }
@@ -1230,6 +1234,8 @@ namespace PS5GameLauncher
     {
         public static volatile bool Enabled;
         public static volatile bool Muted;
+        /// <summary>Keep the Create button from games (it opens the launcher's capture menu).</summary>
+        public static volatile bool StripCreate;
         static readonly object Gate = new object();
         static readonly Dictionary<string, Virtual> Pads = new Dictionary<string, Virtual>();
         static readonly HashSet<string> Hidden = new HashSet<string>();
@@ -1710,6 +1716,8 @@ namespace PS5GameLauncher
             // Same bit layout as the report: face buttons, then shoulders/sticks, then PS/touchpad/mute.
             // The PS button stays with the launcher (it opens the quick menu), like on a PS5.
             uint buttons = (uint)(b0 & 0xF0) | ((uint)b1 << 8) | ((uint)(b2 & ~0x01) << 16);
+            // While recording is on, the Create button opens the capture menu instead.
+            if (StripCreate) buttons &= ~0x1000u;
             f[4] = (byte)buttons; f[5] = (byte)(buttons >> 8); f[6] = (byte)(buttons >> 16); f[7] = (byte)(buttons >> 24);
             int hat = b0 & 0x0F;
             byte dpad = 0;
@@ -2093,7 +2101,8 @@ namespace PS5GameLauncher
             lock (Gate)
             {
                 int prev;
-                Prev.TryGetValue(src, out prev);
+                // A DualSense sends hundreds of reports a second; nearly all repeat the same buttons.
+                if (Prev.TryGetValue(src, out prev) && prev == mask) return;
                 Prev[src] = mask;
                 var pressed = mask & ~prev;
                 for (var i = 0; i < Bits.Length; i++)
@@ -2103,7 +2112,12 @@ namespace PS5GameLauncher
                     if ((pressed & bit) != 0)
                     {
                         if (bit == GUIDE) Emit("guide", null, false);
-                        else if (Forward) Emit("pad", Names[i], false);
+                        else
+                        {
+                            // Create button of a PlayStation controller: the capture menu.
+                            if (bit == SELECT && src.StartsWith("h")) Emit("share", null, false);
+                            if (Forward) Emit("pad", Names[i], false);
+                        }
                         if (bit <= RIGHT)
                         {
                             HoldSince[key] = Now();
@@ -2258,7 +2272,9 @@ namespace PS5GameLauncher
                     }
                 }
                 Repeats();
-                Thread.Sleep(16);
+                // No XInput pad to read and no menu open: empty slots are only probed every 2 s anyway.
+                var busy = connected[0] || connected[1] || connected[2] || connected[3] || Forward || Passthrough.ExpectingVirtual;
+                Thread.Sleep(busy ? 16 : 100);
             }
         }
 
@@ -2525,16 +2541,65 @@ namespace PS5GameLauncher
 
         static Dictionary<string, string> devices;
 
+        [DllImport("ntdll.dll", EntryPoint = "NtQuerySystemInformation")] static extern int NtQueryList(int cls, IntPtr info, int len, out int retLen);
+        static readonly object ListGate = new object();
+        static IntPtr listBuf = IntPtr.Zero;
+        static int listLen;
+
+        /// <summary>
+        /// Every process's id and name (without ".exe"). Asked for every few
+        /// seconds while games run, so it reads only those two fields from
+        /// SystemProcessInformation into a reused buffer; Process.GetProcesses()
+        /// would build objects for every thread of every process each time.
+        /// </summary>
         public static object List()
         {
-            var list = new List<object>();
+            lock (ListGate)
+            {
+                for (var tries = 0; tries < 5; tries++)
+                {
+                    if (listBuf == IntPtr.Zero)
+                    {
+                        listLen = Math.Max(listLen, 1 << 20);
+                        listBuf = Marshal.AllocHGlobal(listLen);
+                    }
+                    int need;
+                    var st = NtQueryList(5 /* SystemProcessInformation */, listBuf, listLen, out need);
+                    if (st == unchecked((int)0xC0000004)) // STATUS_INFO_LENGTH_MISMATCH: grow and retry
+                    {
+                        Marshal.FreeHGlobal(listBuf);
+                        listBuf = IntPtr.Zero;
+                        listLen = Math.Max(need, listLen) + (256 << 10);
+                        continue;
+                    }
+                    if (st != 0) break;
+                    // SYSTEM_PROCESS_INFORMATION: ImageName (UNICODE_STRING) at 0x38, UniqueProcessId after BasePriority.
+                    int bufferAt = IntPtr.Size == 8 ? 0x40 : 0x3C, pidAt = IntPtr.Size == 8 ? 0x50 : 0x44;
+                    var list = new List<object>(512);
+                    var p = listBuf;
+                    while (true)
+                    {
+                        var next = Marshal.ReadInt32(p);
+                        var len = (ushort)Marshal.ReadInt16(p, 0x38);
+                        var namePtr = Marshal.ReadIntPtr(p, bufferAt);
+                        var pid = (int)Marshal.ReadIntPtr(p, pidAt).ToInt64();
+                        var name = pid == 0 ? "Idle" : namePtr == IntPtr.Zero ? "" : Marshal.PtrToStringUni(namePtr, len / 2);
+                        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 4);
+                        list.Add(new Dictionary<string, object> { { "pid", pid }, { "name", name } });
+                        if (next == 0) break;
+                        p += next;
+                    }
+                    return list;
+                }
+            }
+            var all = new List<object>();
             foreach (var p in System.Diagnostics.Process.GetProcesses())
             {
-                try { list.Add(new Dictionary<string, object> { { "pid", p.Id }, { "name", p.ProcessName } }); }
+                try { all.Add(new Dictionary<string, object> { { "pid", p.Id }, { "name", p.ProcessName } }); }
                 catch { }
                 p.Dispose();
             }
-            return list;
+            return all;
         }
 
         static string ToDos(string nt)
@@ -2849,6 +2914,55 @@ namespace PS5GameLauncher
                 }
                 Suspended.Clear();
             }
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* The launcher's own processes while a game runs                      */
+    /* ------------------------------------------------------------------ */
+
+    // Only ever called with the launcher's own (Electron) process ids. While a
+    // game is in front they get Windows' efficiency mode (EcoQoS: efficient
+    // cores, low clocks, no high-resolution timer requests) and a lower
+    // priority, and their memory is trimmed, so the game gets the machine.
+    static class Qos
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        struct PROCESS_POWER_THROTTLING_STATE { public uint Version; public uint ControlMask; public uint StateMask; }
+
+        [DllImport("kernel32", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+        [DllImport("kernel32")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32", SetLastError = true)] static extern bool SetProcessInformation(IntPtr h, int cls, ref PROCESS_POWER_THROTTLING_STATE info, int size);
+        [DllImport("kernel32", SetLastError = true)] static extern bool SetPriorityClass(IntPtr h, uint cls);
+        [DllImport("psapi", SetLastError = true)] static extern bool EmptyWorkingSet(IntPtr h);
+
+        const uint SET_QUOTA = 0x0100, SET_INFORMATION = 0x0200, QUERY_LIMITED = 0x1000;
+        const uint NORMAL_PRIORITY = 0x20, BELOW_NORMAL_PRIORITY = 0x4000;
+        const uint EXECUTION_SPEED = 0x1, IGNORE_TIMER_RESOLUTION = 0x4;
+
+        /// <summary>eco: efficiency mode on/off (off = Windows decides again). trim: page out what isn't in use.</summary>
+        public static int Apply(IEnumerable<int> pids, bool eco, bool lower, bool trim)
+        {
+            var n = 0;
+            foreach (var pid in pids)
+            {
+                var h = OpenProcess(SET_QUOTA | SET_INFORMATION | QUERY_LIMITED, false, pid);
+                if (h == IntPtr.Zero) continue;
+                try
+                {
+                    var mask = EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION;
+                    var st = new PROCESS_POWER_THROTTLING_STATE { Version = 1, ControlMask = eco ? mask : 0, StateMask = eco ? mask : 0 };
+                    SetProcessInformation(h, 4 /* ProcessPowerThrottling */, ref st, Marshal.SizeOf(typeof(PROCESS_POWER_THROTTLING_STATE)));
+                    SetPriorityClass(h, eco && lower ? BELOW_NORMAL_PRIORITY : NORMAL_PRIORITY);
+                    if (trim) EmptyWorkingSet(h);
+                    n++;
+                }
+                finally
+                {
+                    CloseHandle(h);
+                }
+            }
+            return n;
         }
     }
 

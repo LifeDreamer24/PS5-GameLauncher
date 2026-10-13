@@ -1178,3 +1178,288 @@ body[data-input="mouse"] .text-dialog .osk {
   width: 2.4rem;
   height: 2.4rem;
 }
+
+/* Capture menu (Create button) -------------------------------------------- */
+.capture-bar {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.22s var(--ease);
+}
+
+.capture-bar.open {
+  opacity: 1;
+}
+
+.cb-band {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 24vh;
+  padding: 0 5.5rem 2rem;
+  background: linear-gradient(to bottom, rgba(8, 9, 13, 0.82), rgba(8, 9, 13, 0.96) 18%, rgba(6, 7, 10, 0.98));
+  transform: translateY(3rem);
+  transition: transform 0.32s var(--ease-out);
+}
+
+.capture-bar.open .cb-band {
+  transform: none;
+}
+
+.cb-left {
+  display: flex;
+  align-items: center;
+}
+
+.cb-right {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cb-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  padding-top: 3.4rem;
+}
+
+.cb-row {
+  display: flex;
+  gap: 4.4rem;
+}
+
+.cb-btn {
+  --fx-r: 4.2rem; /* round focus ring */
+  width: 8.4rem;
+  height: 8.4rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 4.4rem;
+  color: #fff;
+  background: transparent;
+  transition: background 0.18s, color 0.18s, transform 0.18s var(--ease-out), box-shadow 0.18s;
+}
+
+.cb-btn .rec-dot {
+  color: #e5343c;
+}
+
+.cb-btn.focused {
+  background: #f4f5f7;
+  color: #17181c;
+}
+
+.cb-btn.disabled {
+  opacity: 0.35;
+}
+
+.cb-btn.recording .rec-dot {
+  animation: recPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recPulse {
+  50% { opacity: 0.35; }
+}
+
+.cb-opt {
+  font-size: 4rem;
+}
+
+.cb-label {
+  min-height: 3.2rem;
+  font-size: 2.6rem;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.cb-thumb {
+  --fx-r: 0.4rem;
+  position: relative;
+  width: 24rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.4rem;
+  background: #1a1c22;
+  display: grid;
+  place-items: center;
+  transition: box-shadow 0.18s, transform 0.18s var(--ease-out);
+}
+
+.cb-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit; /* no overflow clipping: it would hide the focus ring */
+}
+
+.cb-thumb-empty {
+  font-size: 4.4rem;
+  color: var(--text-3);
+}
+
+.cb-thumb-badge {
+  position: absolute;
+  right: 0.8rem;
+  bottom: 0.8rem;
+  font-size: 2rem;
+  color: #fff;
+  filter: drop-shadow(0 0.2rem 0.4rem rgba(0, 0, 0, 0.6));
+}
+
+.cb-thumb.focused {
+  transform: scale(1.03);
+}
+
+.cb-status {
+  position: absolute;
+  left: 50%;
+  bottom: calc(24vh + 1.6rem);
+  transform: translateX(-50%);
+  padding: 1rem 2.4rem;
+  border-radius: 99rem;
+  background: rgba(8, 9, 13, 0.88);
+  color: var(--text-2);
+  font-size: 2.1rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.cb-status.show {
+  opacity: 1;
+}
+
+/* Media Gallery ----------------------------------------------------------- */
+.gal-img {
+  position: relative;
+}
+
+.gal-img video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gal-badge {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 1rem;
+  border-radius: 0.6rem;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 1.8rem;
+}
+
+.gal-badge .ic {
+  font-size: 1.6rem;
+}
+
+.gallery-viewer {
+  /* Same layer as other overlays: menus opened from it stack above it. */
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.22s var(--ease);
+}
+
+.gallery-viewer.open {
+  opacity: 1;
+}
+
+.gv-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.gv-media {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.gv-media img,
+.gv-media video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.gallery-viewer.full .gv-media img,
+.gallery-viewer.full .gv-media video {
+  width: 100%;
+  height: 100%;
+}
+
+/* Full screen: the picture takes the whole screen, the bar floats over it and fades when idle. */
+.gallery-viewer.full .gv-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transition: opacity 0.4s var(--ease);
+}
+
+.gallery-viewer.full.idle .gv-bar {
+  opacity: 0;
+}
+
+.gallery-viewer.full.idle {
+  cursor: none;
+}
+
+.gv-osd {
+  position: absolute;
+  top: 4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1rem 2.4rem;
+  border-radius: 99rem;
+  background: rgba(8, 9, 13, 0.78);
+  color: #fff;
+  font-size: 2.2rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.gv-osd.show {
+  opacity: 1;
+}
+
+.gv-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2rem 5rem;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.85));
+}
+
+.gv-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.gv-title b {
+  font-size: 2.6rem;
+  font-weight: 500;
+}
+
+.gv-title span {
+  font-size: 1.9rem;
+  color: var(--text-3);
+}

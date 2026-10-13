@@ -52,6 +52,13 @@ const P = {
   minimize: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   maximize: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+  // Capture menu (PS5 style: a frame with a symbol in its corner)
+  clipRecent: '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3"/><circle cx="17" cy="17" r="4.2"/><path d="M17 15v2.2l1.4 1"/>',
+  screenshot: '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3"/><path d="M12.6 15.4h1.6l.9-1.3h3.8l.9 1.3h1.6a.6.6 0 0 1 .6.6V21a.6.6 0 0 1-.6.6h-8.8A.6.6 0 0 1 12 21v-5a.6.6 0 0 1 .6-.6z"/><circle cx="17" cy="18.3" r="1.5"/>',
+  record: '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3"/><circle class="rec-dot" cx="17" cy="17" r="3.6" fill="currentColor" stroke="none"/>',
+  recordStop: '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3"/><rect class="rec-dot" x="13.8" y="13.8" width="6.4" height="6.4" rx="1.2" fill="currentColor" stroke="none"/>',
+  gallery: '<rect x="6" y="3" width="15" height="13" rx="2"/><path d="M3 7v11a2 2 0 0 0 2 2h12"/><path d="m9 13 3-3 2 2 2-2 3 3"/>',
+  fCaptures: '<rect x="2.4" y="5.8" width="19.2" height="12.4" rx="2.4" stroke-width="2.2"/><circle cx="12" cy="12" r="2.9" fill="currentColor" stroke="none"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   tag: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><path d="M7 7h.01"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',

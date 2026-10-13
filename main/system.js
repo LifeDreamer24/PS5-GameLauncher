@@ -67,6 +67,7 @@ class SystemBridge extends EventEmitter {
     proc.on('error', () => {});
     if (this.forward || this.keepForward) setTimeout(() => this.setPadForward(this.forward), 300);
     if (this.passthroughArgs) setTimeout(() => this.request('passthrough', this.passthroughArgs).catch(() => {}), 600);
+    if (this.captureButton) setTimeout(() => this.request('captureButton', { value: true }).catch(() => {}), 300);
   }
 
   request(cmd, args = {}, timeout = 8000) {

@@ -4,12 +4,13 @@
 
 import { state, on, loadState, api } from './state.js';
 import { setHandler, setGamepadPolling, externalAction } from './input.js';
-import { configureSound, unlockAudio, setSoundPacks } from './sound.js';
+import { configureSound, unlockAudio, setSoundPacks, resetAudio } from './sound.js';
 import { topOverlay } from './ui/overlay.js';
 import { QuickMenu } from './views/quickmenu.js';
 import { loadDiscord } from './discord.js';
 import { setLanguage, language } from './i18n.js';
 import { toast } from './ui/toast.js';
+import { openCaptureBar } from './ui/capturebar.js';
 
 const router = {
   home: (params) => api.overlayNavigate({ view: 'home', params }),
@@ -59,9 +60,16 @@ async function main() {
     if (!quick.ctl) api.overlayClosed();
   };
 
+  // The capture menu (Create button) is the other thing this window shows.
+  let capture = null;
+  const closeCapture = () => {
+    if (capture) capture.close();
+    else api.overlayClosed();
+  };
+
   setHandler((action, meta) => {
     unlockAudio();
-    if (action === 'guide') {
+    if (action === 'guide' && !capture) {
       if (quick.ctl) quick.close();
       else api.overlayClosed();
       return;
@@ -70,13 +78,30 @@ async function main() {
     if (o) o.handle(action, meta);
   });
 
-  api.on('overlay:open', () => {
+  api.on('overlay:open', (info) => {
+    if (info && info.mode === 'capture') {
+      if (!capture && !quick.ctl) {
+        capture = openCaptureBar({
+          capture: info.capture,
+          navigate: (nav) => api.overlayNavigate(nav),
+          onClosed: () => {
+            capture = null;
+            // After the closing animation, like the quick menu.
+            setTimeout(() => !quick.ctl && !capture && api.overlayClosed(), 280);
+          },
+        });
+      }
+      return;
+    }
     if (!quick.ctl) quick.open();
     updateClock();
   });
   api.on('overlay:toast', (n) => toast({ ...n, sound: true }));
+  // In-game sleep: close the audio output until the next menu or notification.
+  on('sleep', (asleep) => asleep && resetAudio());
   api.on('overlay:close', () => {
-    if (quick.ctl) quick.close();
+    if (capture) closeCapture();
+    else if (quick.ctl) quick.close();
     else api.overlayClosed();
   });
   api.on('pad:action', (a) => {

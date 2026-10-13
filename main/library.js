@@ -172,9 +172,12 @@ class Library {
       seen.add(r.id);
       const g = byId.get(r.id);
       if (g) {
+        const ownArgs = g.argsEdited && g.launch && g.launch.type === 'exe' ? g.launch.args : null;
         for (const k of ['launch', 'direct', 'directSafe', 'storeId', 'altDirs', 'path', 'folder', 'installDir', 'exe', 'sizeOnDisk', 'steamPlaytime', 'steamLastPlayed']) {
           if (r[k] !== undefined) g[k] = r[k];
         }
+        // Arguments the user set for a shortcut/.exe game win over the shortcut's own.
+        if (ownArgs !== null && g.launch && g.launch.type === 'exe') g.launch = { ...g.launch, args: ownArgs };
         if (!g.nameLocked && !g.meta?.title) g.name = r.name;
         if (!g.steamAppId && r.steamAppId && !g.noSteamMatch) {
           g.steamAppId = r.steamAppId;
@@ -440,8 +443,10 @@ class Library {
     for (const k of allowed) if (k in patch) g[k] = patch[k];
     if ('name' in patch) g.nameLocked = true;
     if (patch.launchArgs !== undefined) {
-      if (g.launch && g.launch.type === 'exe') g.launch.args = patch.launchArgs;
-      else g.launchArgs = patch.launchArgs; // added to store and direct starts
+      if (g.launch && g.launch.type === 'exe') {
+        g.launch.args = patch.launchArgs;
+        g.argsEdited = true; // kept when a rescan reads the shortcut again
+      } else g.launchArgs = patch.launchArgs; // added to store and direct starts
     }
     this.save();
     return g;
