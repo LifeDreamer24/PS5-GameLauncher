@@ -3,7 +3,7 @@
 
 import { h, escapeHtml, fmtPlaytime, timeAgo, fmtDate, fmtBytes } from '../util.js';
 import { icon } from '../icons.js';
-import { api, artUrl, state, playtimeOf, lastActive, sourceLabel, sourceName, gamesIn, sortGames, findGame } from '../state.js';
+import { api, artUrl, state, on, playtimeOf, lastActive, sourceLabel, sourceName, gamesIn, sortGames, findGame, downloadFor, isInstalled } from '../state.js';
 import { FocusList } from './overlay.js';
 import { mouseActive } from '../input.js';
 import { launchGame, gameOptions, isRunning } from './gameactions.js';
@@ -12,6 +12,7 @@ import { tileArt } from './tiles.js';
 import { sliderHtml, setSlider, dragSlider } from './slider.js';
 import { sys, mediaCommand, mediaPosition, seekLocal, selectSession, appName, fmtTime } from '../system.js';
 import { t, language } from '../i18n.js';
+import { ACTIVE, statusText, progressOf, fmtLeft, fmtSpeed, startUpdate, startInstall, pulsing } from './downloads.js';
 
 export class HubPanel {
   /**
@@ -28,6 +29,41 @@ export class HubPanel {
     this.cardNav = new FocusList([], { onChange: (el) => this.scrollCards(el) });
     this.actionDefs = [];
     this.cardDefs = [];
+    // A Steam update starting, moving on or finishing for the game shown.
+    on('downloads', () => this.onDownloads());
+  }
+
+  onDownloads() {
+    if (!this.item || this.item.type !== 'game') return;
+    const g = findGame(this.item.game.id) || this.item.game;
+    const d = downloadFor(g);
+    const mode = d ? (ACTIVE.has(d.status) ? 'active' : 'update') : isInstalled(g) ? 'play' : 'download';
+    if (mode !== this.dlMode) {
+      // Update ↔ Play: rebuild the buttons (focus stays on the same one).
+      this.setItem({ ...this.item, game: g }, { animate: false });
+      this.host.onDownloadsChanged && this.host.onDownloadsChanged();
+      return;
+    }
+    this.paintDownload(d);
+  }
+
+  /** The progress strip under the buttons. */
+  paintDownload(d) {
+    const el = this.main.querySelector('.hub-dl');
+    if (!el) return;
+    const active = !!d && ACTIVE.has(d.status);
+    el.classList.toggle('show', !!d);
+    if (!d) return;
+    el.querySelector('.hdl-state').textContent = statusText(d);
+    const bits = [];
+    if (active && d.total) bits.push(`${Math.floor(progressOf(d) * 100)}%`);
+    if (d.status === 'downloading') bits.push(fmtSpeed(d.speed), fmtLeft(d.eta));
+    if (!active && d.total) bits.push(t('{size} to download', { size: fmtBytes(d.total) }));
+    el.querySelector('.hdl-info').textContent = bits.filter(Boolean).join(' · ');
+    el.querySelector('.hdl-bar').style.display = active ? '' : 'none';
+    el.querySelector('.hdl-bar').classList.toggle('pulse', pulsing(d));
+    el.querySelector('.hdl-bar i').style.width = `${Math.max(1, progressOf(d) * 100)}%`;
+    el.classList.toggle('error', d.status === 'error');
   }
 
   /** item: { type: 'game'|'library'|'store'|'add', game? } */
@@ -71,14 +107,26 @@ export class HubPanel {
         'div',
         { class: 'hub-stats' },
         running ? h('div', { class: 'pill running', html: `<i class="dot"></i>Running` }) : null,
+        isInstalled(g) ? null : h('div', { class: 'pill', html: `${icon('download')}<span>${escapeHtml(t('Not installed'))}</span>` }),
         h('div', { class: 'pill', html: `${icon('tag')}<span>${escapeHtml(sourceLabel(g))}</span>` }),
         pt ? h('div', { class: 'pill', html: `${icon('clock')}<span>${fmtPlaytime(pt)}</span>` }) : null
       )
     );
-    this.actionDefs = [
-      { label: running ? 'Continue' : 'Play Game', icon: 'play', primary: true, run: () => launchGame(findGame(g.id) || g) },
-      { icon: 'more', round: true, label: 'Options', run: (el) => gameOptions(findGame(g.id) || g, el) },
-    ];
+    // A Steam update waiting: "Update" instead of "Play Game" (like the PS5).
+    // While it downloads, the button opens Downloads and the strip below shows how far it is.
+    const dl = downloadFor(g);
+    this.dlMode = dl ? (ACTIVE.has(dl.status) ? 'active' : 'update') : isInstalled(g) ? 'play' : 'download';
+    const primary = running
+      ? { label: 'Continue', icon: 'play', primary: true, run: () => launchGame(findGame(g.id) || g) }
+      : this.dlMode === 'update'
+        ? { label: dl.status === 'error' ? 'Try Again' : 'Update', icon: 'download', primary: true, run: () => (isInstalled(g) ? startUpdate : startInstall)(findGame(g.id) || g) }
+        : this.dlMode === 'active'
+          ? { label: dl.status === 'paused' ? 'Resume' : 'View Download', icon: 'download', primary: true, run: () => (dl.status === 'paused' ? startUpdate(findGame(g.id) || g) : this.host.openView('downloads')) }
+          : this.dlMode === 'download'
+            ? { label: 'Download', icon: 'download', primary: true, run: () => startInstall(findGame(g.id) || g) }
+            : { label: 'Play Game', icon: 'play', primary: true, run: () => launchGame(findGame(g.id) || g) };
+    this.actionDefs = [primary, { icon: 'more', round: true, label: 'Options', run: (el) => gameOptions(findGame(g.id) || g, el) }];
+    if (this.dlMode === 'active' && dl.status === 'paused' && isInstalled(g)) this.actionDefs.splice(1, 0, { label: 'Play Game', icon: 'play', run: () => launchGame(findGame(g.id) || g) });
 
     const shots = g.screenshots || [];
     const m = g.meta || {};
@@ -127,8 +175,8 @@ export class HubPanel {
           ${g.sizeOnDisk ? `<dt>${t('Size')}</dt><dd>${escapeHtml(fmtBytes(g.sizeOnDisk))}</dd>` : ''}
           ${g.steamAppId ? `<dt>${t('Steam App')}</dt><dd>${escapeHtml(g.steamAppId)}</dd>` : ''}
         </dl>
-        <div class="card-foot">${icon('external')} ${t('Open file location')}</div>`,
-      run: () => api.openLocation(g.id),
+        ${isInstalled(g) ? `<div class="card-foot">${icon('external')} ${t('Open file location')}</div>` : ''}`,
+      run: () => (isInstalled(g) ? api.openLocation(g.id) : this.showDetails(g)),
     });
   }
 
@@ -292,6 +340,12 @@ export class HubPanel {
     });
     row.append(...els);
     this.main.append(row);
+    if (this.item && this.item.type === 'game') {
+      this.main.append(
+        h('div', { class: 'hub-dl' }, h('div', { class: 'hdl-text' }, h('span', { class: 'hdl-state' }), h('span', { class: 'hdl-info' })), h('div', { class: 'hdl-bar' }, h('i')))
+      );
+      this.paintDownload(downloadFor(findGame(this.item.game.id) || this.item.game));
+    }
     const wasFocused = this.actions.current && this.actions.current.classList.contains('focused');
     this.actions = new FocusList(els, { index: Math.min(Math.max(keep, 0), els.length - 1) });
     if (!wasFocused) this.actions.blur();

@@ -224,6 +224,7 @@ class GameMonitor {
         byName.get(n).push(p.pid);
       }
       const alive = new Set(procs.map((p) => p.pid));
+      this.procNames = byName; // for others asking whether a program runs (Steam downloads)
       for (const pid of this.pidPaths.keys()) if (!alive.has(pid)) this.pidPaths.delete(pid);
       for (const pid of this.pidSeen.keys()) if (!alive.has(pid)) this.pidSeen.delete(pid);
 

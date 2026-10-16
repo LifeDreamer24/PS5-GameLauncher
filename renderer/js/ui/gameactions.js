@@ -1,10 +1,11 @@
 // Launching games and the per-game options ("…") menu.
 
 import { h, sleep } from '../util.js';
-import { api, on, artUrl, state, findGame, pushNotification } from '../state.js';
+import { api, on, artUrl, state, findGame, pushNotification, downloadFor, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
 import { optionsMenu, confirmDialog, textDialog, matchDialog } from './dialogs.js';
 import { mountOverlay } from './overlay.js';
+import { startUpdate, startInstall } from './downloads.js';
 import { t } from '../i18n.js';
 
 let launching = false;
@@ -51,6 +52,8 @@ function watchGameShown(id) {
 
 export async function launchGame(game) {
   if (!game || launching) return;
+  // Owned on Steam but not on this PC: download it instead.
+  if (!isInstalled(game)) return startInstall(game);
   if (state.running.has(game.id)) return continueGame(game);
   // Only one game at a time: offer to close the one that is running.
   const other = [...state.running].map((id) => findGame(id)).find(Boolean);
@@ -152,8 +155,14 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
   if (!game) return;
   const id = game.id;
   const running = state.running.has(id);
+  const dl = downloadFor(game);
+  if (!isInstalled(game)) return notInstalledOptions(game, anchor, dl);
   const items = [
     ...extra,
+    // A Steam update waiting (or one that stopped): start it from here too.
+    dl && (dl.status === 'available' || dl.status === 'error' || dl.status === 'paused')
+      ? { label: dl.status === 'paused' ? 'Resume Update' : 'Update', icon: 'download', run: () => startUpdate(findGame(id) || game) }
+      : null,
     running
       ? { label: 'Continue', icon: 'play', run: () => continueGame(findGame(id) || game) }
       : { label: 'Play', icon: 'play', run: () => launchGame(findGame(id) || game) },
@@ -164,24 +173,8 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
       run: () => api.updateGame(id, { favorite: !game.favorite }),
     },
     { label: 'Change Artwork', icon: 'image', submenu: true, run: () => changeArtwork(game, anchor) },
-    {
-      label: 'Rename…',
-      icon: 'edit',
-      run: async () => {
-        const name = await textDialog({ title: 'Rename', value: game.name });
-        if (name && name.trim()) await api.updateGame(id, { name: name.trim() });
-      },
-    },
-    {
-      label: game.category === 'media' ? 'Move to Games' : 'Move to Media',
-      icon: game.category === 'media' ? 'gamepad' : 'music',
-      run: () => api.updateGame(id, { category: game.category === 'media' ? 'game' : 'media' }),
-    },
-    {
-      label: game.hidden ? 'Show on Home' : 'Hide from Home',
-      icon: game.hidden ? 'eye' : 'eyeOff',
-      run: () => api.updateGame(id, { hidden: !game.hidden }),
-    },
+    // Name, where it shows and its start arguments, in one place (keeps this menu short).
+    { label: 'Manage…', icon: 'sliders', submenu: true, run: () => manageGame(game, anchor) },
   ];
   const PAUSE_MODES = [
     { value: 'auto', label: 'Automatic', hint: 'Only while the game is offline' },
@@ -205,27 +198,21 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
   });
   // Controller passthrough: single-player games that use the DualSense's own
   // features (HD haptics, adaptive triggers) can get the real controller and
-  // are paused while a menu is open instead.
+  // are paused while a menu is open instead. With the virtual one, each game
+  // can have its own kind of controller (an Xbox one for a game that only
+  // knows Xbox buttons, say).
   if (state.settings.controllerPassthrough) {
-    const CONTROLLER_MODES = [
-      { value: 'virtual', label: 'Virtual Controller', hint: 'Ignores presses in menus' },
-      { value: 'real', label: 'Real Controller', hint: 'HD haptics, adaptive triggers' },
-    ];
-    const controllerMode = game.controllerMode || 'virtual';
-    items.push({
-      label: 'Controller',
-      icon: 'gamepad',
-      hint: CONTROLLER_MODES.find((m) => m.value === controllerMode).label,
-      submenu: true,
-      run: async () => {
-        const choice = await optionsMenu({
-          title: 'Controller for This Game',
-          anchor,
-          items: CONTROLLER_MODES.map((m) => ({ ...m, checked: m.value === controllerMode })),
-        });
-        if (choice) await api.updateGame(id, { controllerMode: choice.value });
-      },
-    });
+    items.push(
+      { label: 'Controller', icon: 'gamepad', hint: controllerModeLabel(game), submenu: true, run: () => pickControllerMode(game, anchor) },
+      {
+        label: 'Emulated Controller',
+        icon: 'gamepad',
+        hint: game.controllerMode === 'real' ? 'Not used with the real controller' : padEmulationLabel(game),
+        disabled: game.controllerMode === 'real',
+        submenu: true,
+        run: () => pickPadEmulation(game, anchor),
+      }
+    );
   }
   // Store games can start through their store (kept hidden) or straight from
   // their own executable, without the store client.
@@ -268,18 +255,6 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
       },
     });
   }
-  const hasArgs = game.launch && (game.launch.type === 'exe' || game.launch.type === 'steam' || canDirect);
-  if (hasArgs) {
-    items.push({
-      label: 'Launch Options…',
-      icon: 'sliders',
-      run: async () => {
-        const current = game.launch.type === 'exe' ? game.launch.args || '' : game.launchArgs || '';
-        const args = await textDialog({ title: 'Launch arguments', value: current, placeholder: '-windowed -novid' });
-        if (args !== null) await api.updateGame(id, { launchArgs: args });
-      },
-    });
-  }
   items.push(
     { label: 'Open File Location', icon: 'folder', run: () => api.openLocation(id) },
     {
@@ -300,6 +275,140 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
   return optionsMenu({ title: game.name, anchor, items: items.filter(Boolean) });
 }
 
+/** A Steam game that isn't on this PC: download it, or tidy up its library entry. */
+function notInstalledOptions(game, anchor, dl) {
+  const id = game.id;
+  return optionsMenu({
+    title: game.name,
+    anchor,
+    items: [
+      dl ? null : { label: 'Download', icon: 'download', run: () => startInstall(findGame(id) || game) },
+      {
+        label: game.favorite ? 'Remove from Favorites' : 'Add to Favorites',
+        icon: game.favorite ? 'starFill' : 'star',
+        run: () => api.updateGame(id, { favorite: !game.favorite }),
+      },
+      { label: 'Change Artwork', icon: 'image', submenu: true, run: () => changeArtwork(game, anchor) },
+      { label: 'Manage…', icon: 'sliders', submenu: true, run: () => manageGame(game, anchor) },
+      { label: 'View in Steam Store', icon: 'steam', run: () => api.openExternal(`steam://store/${game.steamAppId}`) },
+      {
+        label: 'Remove from Library',
+        icon: 'trash',
+        danger: true,
+        run: async () => {
+          const ok = await confirmDialog({
+            title: t('Remove {name}?', { name: game.name }),
+            message: 'It will be removed from the launcher and ignored by future scans. You still own it on Steam.\nYou can bring removed games back in Settings › Library.',
+            confirmLabel: 'Remove',
+            danger: true,
+          });
+          if (ok) await api.removeGame(id);
+        },
+      },
+    ].filter(Boolean),
+  });
+}
+
+/** Options › Manage…: Rename, Move to Media, Hide from Home, Launch Options. */
+async function manageGame(game, anchor) {
+  const id = game.id;
+  const canDirect = !!(game.direct && game.direct.target) || (game.source === 'steam' && !!game.installDir);
+  const hasArgs = isInstalled(game) && game.launch && (game.launch.type === 'exe' || game.launch.type === 'steam' || canDirect);
+  await optionsMenu({
+    title: 'Manage',
+    anchor,
+    items: [
+      {
+        label: 'Rename…',
+        icon: 'edit',
+        run: async () => {
+          const name = await textDialog({ title: 'Rename', value: game.name });
+          if (name && name.trim()) await api.updateGame(id, { name: name.trim() });
+        },
+      },
+      {
+        label: game.category === 'media' ? 'Move to Games' : 'Move to Media',
+        icon: game.category === 'media' ? 'gamepad' : 'music',
+        run: () => api.updateGame(id, { category: game.category === 'media' ? 'game' : 'media' }),
+      },
+      {
+        label: game.hidden ? 'Show on Home' : 'Hide from Home',
+        icon: game.hidden ? 'eye' : 'eyeOff',
+        run: () => api.updateGame(id, { hidden: !game.hidden }),
+      },
+      hasArgs
+        ? {
+            label: 'Launch Options…',
+            icon: 'play',
+            run: async () => {
+              const current = game.launch.type === 'exe' ? game.launch.args || '' : game.launchArgs || '';
+              const args = await textDialog({ title: 'Launch arguments', value: current, placeholder: '-windowed -novid' });
+              if (args !== null) await api.updateGame(id, { launchArgs: args });
+            },
+          }
+        : null,
+    ].filter(Boolean),
+  });
+}
+
 export function isRunning(game) {
   return state.running.has(game.id);
+}
+
+/* Controller passthrough, per game ---------------------------------- */
+
+const CONTROLLER_MODES = [
+  { value: 'virtual', label: 'Virtual Controller', hint: 'Ignores presses in menus' },
+  { value: 'real', label: 'Real Controller', hint: 'HD haptics, adaptive triggers' },
+];
+
+/** What the virtual controller is shown to games as (Settings › Controllers sets the default). */
+export const PAD_EMULATION = [
+  { value: 'dualsense', label: 'DualSense', hint: 'Touchpad, motion, PlayStation buttons' },
+  { value: 'dualshock4', label: 'DualShock 4', hint: 'For games that only know PS4 controllers' },
+  { value: 'xbox360', label: 'Xbox Controller', hint: 'Xbox buttons; no touchpad or motion' },
+];
+
+export function emulationName(value) {
+  return (PAD_EMULATION.find((m) => m.value === value) || PAD_EMULATION[0]).label;
+}
+
+export function controllerModeLabel(game) {
+  return CONTROLLER_MODES.find((m) => m.value === (game.controllerMode || 'virtual')).label;
+}
+
+/** The game's own emulated controller, or "Default (…)" when it follows the setting. */
+export function padEmulationLabel(game) {
+  const own = game.padEmulation && game.padEmulation !== 'default' ? game.padEmulation : null;
+  return own ? emulationName(own) : t('Default ({name})', { name: t(emulationName(state.settings.passthroughEmulation)) });
+}
+
+export async function pickControllerMode(game, anchor) {
+  const cur = game.controllerMode || 'virtual';
+  const choice = await optionsMenu({
+    title: 'Controller for This Game',
+    anchor,
+    index: Math.max(0, CONTROLLER_MODES.findIndex((m) => m.value === cur)),
+    items: CONTROLLER_MODES.map((m) => ({ ...m, checked: m.value === cur })),
+  });
+  if (!choice || choice.value === cur) return;
+  game.controllerMode = choice.value; // shown right away; the library update follows
+  await api.updateGame(game.id, { controllerMode: choice.value });
+}
+
+export async function pickPadEmulation(game, anchor) {
+  const cur = game.padEmulation && game.padEmulation !== 'default' ? game.padEmulation : 'default';
+  const items = [
+    { value: 'default', label: t('Default ({name})', { name: t(emulationName(state.settings.passthroughEmulation)) }), hint: 'Settings › Controllers' },
+    ...PAD_EMULATION,
+  ];
+  const choice = await optionsMenu({
+    title: 'Emulated Controller',
+    anchor,
+    index: Math.max(0, items.findIndex((m) => m.value === cur)),
+    items: items.map((m) => ({ ...m, checked: m.value === cur })),
+  });
+  if (!choice || choice.value === cur) return;
+  game.padEmulation = choice.value;
+  await api.updateGame(game.id, { padEmulation: choice.value });
 }

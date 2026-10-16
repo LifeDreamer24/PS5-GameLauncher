@@ -10,9 +10,10 @@ import { HomeView } from './views/home.js';
 import { LibraryView } from './views/library.js';
 import { SettingsView } from './views/settings.js';
 import { HubView } from './views/hub.js';
+import { DownloadsView } from './views/downloads.js';
 import { QuickMenu } from './views/quickmenu.js';
 import { openSearch } from './views/search.js';
-import { openGallery } from './views/gallery.js';
+import { GalleryView } from './views/gallery.js';
 import { runBoot } from './views/boot.js';
 import { loadDiscord } from './discord.js';
 import { setLanguage, t, language } from './i18n.js';
@@ -210,6 +211,8 @@ async function main() {
   router.register(new LibraryView(router));
   router.register(new SettingsView(router));
   router.register(new HubView(router));
+  router.register(new DownloadsView(router));
+  router.register(new GalleryView(router));
   quick = new QuickMenu(router);
 
   setHandler((action, meta) => {
@@ -288,10 +291,11 @@ async function main() {
     else if (nav.view === 'search') {
       router.home();
       router.openSearch();
-    } else if (nav.view === 'gallery') {
-      router.home();
-      openGallery();
-    } else router.open(nav.view, nav.params || {});
+    } else {
+      // Views opened from a game (Media Gallery, Downloads…): Back leads home.
+      if ((nav.view === 'gallery' || nav.view === 'downloads') && router.current && router.current.name !== nav.view) router.home();
+      router.open(nav.view, nav.params || {});
+    }
   });
 
   on('game-exited', (e) => {

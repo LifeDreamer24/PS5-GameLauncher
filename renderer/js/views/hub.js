@@ -23,6 +23,7 @@ export class HubView {
         this.focusZone(zone, i, true);
       },
       openView: (name, params) => this.router.open(name, params),
+      onDownloadsChanged: () => this.applyZone(),
     });
     this.titleEl = h('div', { class: 'hubv-title' });
     this.hints = h('div', { class: 'hubv-hints' });

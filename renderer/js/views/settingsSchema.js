@@ -181,6 +181,7 @@ function passthroughItems() {
         { value: 'xbox360', label: 'Xbox Controller' },
       ],
     },
+    { type: 'note', label: 'A game can have its own: Options › Emulated Controller on the game.' },
   ];
 }
 
@@ -351,6 +352,7 @@ const NOTIFY_KINDS = [
   { id: 'controller', label: 'Controllers', icon: 'gamepad' },
   { id: 'game', label: 'Game Sessions', icon: 'play' },
   { id: 'capture', label: 'Captures', icon: 'camera' },
+  { id: 'downloads', label: 'Downloads', icon: 'download' },
   { id: 'library', label: 'Library and Artwork', icon: 'library' },
   { id: 'system', label: 'System', icon: 'settings' },
 ];
@@ -582,13 +584,21 @@ export function buildSchema(router) {
           label: 'Scanning',
           items: () => [
             onOff('scanSteam', 'Scan Steam Library'),
+            onOff('steamOwned', 'Show Steam Games That Aren’t Installed', 'Games you own on Steam show in the Game Library, ready to download.'),
             onOff('scanEpic', 'Scan Epic Games Library'),
             onOff('scanXbox', 'Scan Xbox / Microsoft Store Games'),
             onOff('scanUbisoft', 'Scan Ubisoft Connect Library'),
             onOff('rescanOnStartup', 'Scan for New Games at Startup'),
+            onOff('steamAutoUpdate', 'Update Steam Games Right Away', 'When a game has an update, the launcher asks Steam to download it straight away instead of on Steam’s schedule.'),
             { type: 'action', label: 'Scan Now', icon: 'refresh', run: () => api.scan() },
             { type: 'header', label: 'Detected' },
-            { type: 'info', label: 'Steam', value: state.info.steam ? `${state.info.steam.count} installed` : state.settings.scanSteam ? 'Not found' : 'Off' },
+            {
+              type: 'info',
+              label: 'Steam',
+              value: state.info.steam
+                ? t(state.info.steam.owned ? '{n} installed · {m} to download' : '{n} installed', { n: state.info.steam.count, m: state.info.steam.owned })
+                : state.settings.scanSteam ? 'Not found' : 'Off',
+            },
             { type: 'info', label: 'Epic Games', value: state.info.epic ? 'Found' : state.settings.scanEpic ? 'Not found' : 'Off' },
             { type: 'info', label: 'Xbox', value: state.info.xbox ? 'Found' : state.settings.scanXbox !== false ? 'Not found' : 'Off' },
             { type: 'info', label: 'Ubisoft Connect', value: state.info.ubisoft ? 'Found' : state.settings.scanUbisoft !== false ? 'Not found' : 'Off' },

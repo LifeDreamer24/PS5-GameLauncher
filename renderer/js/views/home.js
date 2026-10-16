@@ -10,6 +10,7 @@ import { FocusList } from '../ui/overlay.js';
 import { heroBg } from '../ui/herobg.js';
 import { tileArt, specialArt } from '../ui/tiles.js';
 import { HubPanel } from '../ui/gamehub.js';
+import { tileDownload, updateTileDownloads } from '../ui/downloads.js';
 import { launchGame, gameOptions, isRunning } from '../ui/gameactions.js';
 import { optionsMenu } from '../ui/dialogs.js';
 import { avatarHtml } from '../ui/avatar.js';
@@ -45,6 +46,7 @@ export class HomeView {
     setInterval(() => this.active && this.tab === 'media' && !state.asleep && this.hub.tickNowPlaying(), 500);
     on('sleep', () => this.syncMediaWatch());
     on('running', () => this.refresh());
+    on('downloads', () => updateTileDownloads(this.carousel));
     on('settings', (k) => {
       if (k === null || ['homeCount', 'homeSort', 'showStore', 'tileStyle', 'profileName', 'avatar'].includes(k)) this.refresh(true);
     });
@@ -96,6 +98,7 @@ export class HomeView {
         this.focusZone(zone, i, true);
       },
       openView: (name, params) => this.router.open(name, params),
+      onDownloadsChanged: () => this.restoreFocusVisual(),
     });
 
     this.scroller = h('div', { class: 'home-scroller' }, this.carousel, this.titleEl, this.hub.el);
@@ -205,6 +208,7 @@ export class HomeView {
         const inner = h('div', { class: 'tile-inner' }, art);
         el = h('div', { class: `tile tile-${it.type} fx` }, inner);
         if (it.game && isRunning(it.game)) el.append(h('div', { class: 'tile-running' }));
+        if (it.game && it.game.steamAppId) el.append(tileDownload(it.game));
         el._sig = sig;
         el.addEventListener('click', () => this.onTileClick(el));
       }
@@ -385,7 +389,8 @@ export class HomeView {
     if (!it) return;
     const el = this.tileEls.get(it.key);
     replayClass(el?.firstElementChild, 'press');
-    if (it.type === 'game') launchGame(it.game);
+    // A game: what its main button says (Play Game, Continue, or Update when one is waiting).
+    if (it.type === 'game') this.hub.item && this.hub.item.key === it.key ? this.hub.activateAction(0) : launchGame(it.game);
     else if (it.type === 'library' || it.type === 'media-empty') {
       sfx.select();
       this.router.open('library', { tab: this.tab === 'media' ? 'media' : 'game' });

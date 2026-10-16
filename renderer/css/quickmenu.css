@@ -316,6 +316,10 @@
   color: #ff9a9a;
 }
 
+.qp-row.disabled > * {
+  opacity: 0.4;
+}
+
 .qp-ic {
   font-size: 2.8rem;
   color: var(--text-2);
@@ -1063,4 +1067,89 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Downloads (Steam updates) in the Notifications panel and the card row -- */
+.qp-row.t-section {
+  min-height: 0;
+  padding: 1.2rem 1.8rem 0.6rem;
+}
+
+.qp-row.t-section > * {
+  opacity: 1;
+}
+
+.qp-section {
+  font-size: 1.9rem;
+  color: var(--text-3);
+}
+
+.qp-row.t-download {
+  align-items: center;
+  gap: 2rem;
+  padding: 1.6rem 1.8rem;
+}
+
+.qp-dl-cover {
+  flex: none;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 0.6rem;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  font-size: 3.4rem;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.qp-dl-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.qp-dl-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.4rem;
+  font-size: 1.9rem;
+  color: var(--text-2);
+}
+
+.qp-dl-line span:last-child {
+  white-space: nowrap;
+}
+
+.qp-dl-bar {
+  display: block;
+  margin-top: 0.8rem;
+  height: 0.5rem;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.qp-dl-bar i,
+.qc-dl-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #fff;
+  transition: width 0.9s linear;
+}
+
+.qc-dl-bar {
+  position: absolute;
+  left: 1.6rem;
+  right: 1.6rem;
+  bottom: 1.4rem;
+  height: 0.5rem;
+  border-radius: 0.25rem;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.qc-dl-bar i {
+  width: 0;
 }

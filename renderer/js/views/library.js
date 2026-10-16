@@ -3,14 +3,15 @@
 
 import { h, escapeHtml, bump, clamp } from '../util.js';
 import { icon } from '../icons.js';
-import { state, on, gamesIn, sortGames, api, sourceLabel } from '../state.js';
+import { state, on, gamesIn, sortGames, api, sourceLabel, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
 import { rumble, mouseActive } from '../input.js';
 import { FocusList } from '../ui/overlay.js';
 import { tileArt } from '../ui/tiles.js';
-import { optionsMenu } from '../ui/dialogs.js';
+import { optionsMenu, filterPanel } from '../ui/dialogs.js';
 import { gameOptions, isRunning, launchGame } from '../ui/gameactions.js';
 import { addGamesMenu } from '../ui/gamehub.js';
+import { tileDownload, updateTileDownloads } from '../ui/downloads.js';
 import { t } from '../i18n.js';
 
 const COLS = 5;
@@ -28,6 +29,12 @@ const SOURCES = [
   { value: 'ubisoft', label: 'Ubisoft Connect' },
   { value: 'pc', label: 'Shortcuts & PC' },
 ];
+// Steam games the account owns but hasn't installed are in the collection too.
+const INSTALL_FILTERS = [
+  { value: 'all', label: 'All Games' },
+  { value: 'installed', label: 'Installed' },
+  { value: 'notInstalled', label: 'Not Installed' },
+];
 const TABS = [
   { key: 'game', label: 'Your Collection' },
   { key: 'favorites', label: 'Favorites' },
@@ -43,11 +50,13 @@ export class LibraryView {
     this.tab = 'game';
     this.sort = 'recent';
     this.source = 'all';
+    this.installFilter = 'all';
     this.zone = 'grid';
     this.games = [];
     this.build();
     on('games', () => this.active && this.render(true));
     on('running', () => this.active && this.render(true));
+    on('downloads', () => updateTileDownloads(this.grid));
     on('settings', (k) => (k === 'tileStyle' || k === null) && this.active && this.render(true));
   }
 
@@ -58,7 +67,7 @@ export class LibraryView {
         text: t(tab.label),
         onclick: () => {
           this.setZone('tabs', i, true);
-          this.setTab(t.key);
+          this.setTab(TABS[i].key);
         },
         onmouseenter: () => mouseActive() && this.setZone('tabs', i, true),
       })
@@ -114,6 +123,7 @@ export class LibraryView {
     if (this.tab === 'favorites') list = state.games.filter((g) => g.favorite);
     else if (this.tab === 'hidden') list = state.games.filter((g) => g.hidden);
     else list = gamesIn(this.tab);
+    if (this.installFilter !== 'all') list = list.filter((g) => isInstalled(g) === (this.installFilter === 'installed'));
     if (this.source !== 'all') {
       list = list.filter((g) => {
         const src = sourceLabel(g);
@@ -130,7 +140,7 @@ export class LibraryView {
   render(keep = false) {
     const prevId = keep && this.games[this.gridIndex] ? this.games[this.gridIndex].id : null;
     const list = this.list();
-    const sig = `${this.tab}|${this.sort}|${this.source}|${state.settings.tileStyle}|` + list.map((g) => `${g.id}:${g.artVersion}:${g.name}:${g.favorite}:${isRunning(g)}`).join(',');
+    const sig = `${this.tab}|${this.sort}|${this.source}|${this.installFilter}|${state.settings.tileStyle}|` + list.map((g) => `${g.id}:${g.artVersion}:${g.name}:${g.favorite}:${isRunning(g)}:${isInstalled(g)}`).join(',');
     if (keep && sig === this.renderSig) return;
     this.renderSig = sig;
     this.games = list;
@@ -139,13 +149,13 @@ export class LibraryView {
       el.classList.toggle('active', TABS[i].key === this.tab);
       if (TABS[i].key === 'hidden') el.style.display = state.games.some((g) => g.hidden) || this.tab === 'hidden' ? '' : 'none';
     });
-    this.filterBtn.classList.toggle('filtered', this.source !== 'all');
+    this.filterBtn.classList.toggle('filtered', this.source !== 'all' || this.installFilter !== 'all');
 
     this.tileEls = this.games.map((g, i) =>
       h(
         'button',
         {
-          class: 'lib-tile fx',
+          class: `lib-tile fx${isInstalled(g) ? '' : ' not-installed'}`,
           style: { '--i': Math.min(i, 20) },
           onclick: () => {
             this.setZone('grid', null, true);
@@ -170,7 +180,9 @@ export class LibraryView {
             h('span', { class: 'lt-name', text: g.name })
           ),
           g.favorite ? h('div', { class: 'lt-fav', html: icon('starFill') }) : null,
-          isRunning(g) ? h('div', { class: 'tile-running' }) : null
+          isInstalled(g) ? null : h('div', { class: 'lt-cloud', title: t('Not installed'), html: icon('download') }),
+          isRunning(g) ? h('div', { class: 'tile-running' }) : null,
+          g.steamAppId ? tileDownload(g) : null
         )
       )
     );
@@ -303,39 +315,60 @@ export class LibraryView {
 
   async openFilterMenu() {
     sfx.select();
-    const sortText = SORTS.find((s) => s.value === this.sort).label;
-    const sourceText = SOURCES.find((s) => s.value === this.source).label;
-    await optionsMenu({
-      title: 'Sort and Filter',
+    // The PS5's panel beside the button: Sort by, then Filters (the Media Gallery has the same).
+    await filterPanel({
       anchor: this.filterBtn,
-      items: [
+      rows: () => [
         {
-          label: 'Sort By',
-          hint: sortText,
-          icon: 'sort',
-          submenu: true,
-          run: async () => {
-            const choice = await optionsMenu({ title: 'Sort By', anchor: this.filterBtn, items: SORTS.map((s) => ({ ...s, checked: s.value === this.sort })) });
-            if (choice) {
+          type: 'value',
+          label: 'Sort by',
+          value: () => SORTS.find((s) => s.value === this.sort).label,
+          run: async (el) => {
+            const choice = await optionsMenu({ anchor: el, index: SORTS.findIndex((s) => s.value === this.sort), items: SORTS.map((s) => ({ ...s, checked: s.value === this.sort })) });
+            if (choice && choice.value !== this.sort) {
               this.sort = choice.value;
               this.render();
             }
           },
         },
+        { type: 'divider' },
+        { type: 'header', label: 'Filters' },
         {
-          label: 'Show',
-          hint: sourceText,
-          icon: 'filter',
-          submenu: true,
-          run: async () => {
-            const choice = await optionsMenu({ title: 'Show', anchor: this.filterBtn, items: SOURCES.map((s) => ({ ...s, checked: s.value === this.source })) });
-            if (choice) {
+          type: 'value',
+          label: 'Source',
+          value: () => (this.source === 'all' ? '' : SOURCES.find((s) => s.value === this.source).label),
+          run: async (el) => {
+            const choice = await optionsMenu({ anchor: el, index: SOURCES.findIndex((s) => s.value === this.source), items: SOURCES.map((s) => ({ ...s, checked: s.value === this.source })) });
+            if (choice && choice.value !== this.source) {
               this.source = choice.value;
               this.render();
             }
           },
         },
-        { label: 'Add Games', icon: 'plus', submenu: true, run: () => addGamesMenu(this.filterBtn) },
+        {
+          type: 'value',
+          label: 'Installed',
+          value: () => (this.installFilter === 'all' ? '' : INSTALL_FILTERS.find((f) => f.value === this.installFilter).label),
+          run: async (el) => {
+            const choice = await optionsMenu({ anchor: el, index: INSTALL_FILTERS.findIndex((f) => f.value === this.installFilter), items: INSTALL_FILTERS.map((f) => ({ ...f, checked: f.value === this.installFilter })) });
+            if (choice && choice.value !== this.installFilter) {
+              this.installFilter = choice.value;
+              this.render();
+            }
+          },
+        },
+        {
+          type: 'button',
+          label: 'Reset Filters',
+          disabled: () => this.source === 'all' && this.installFilter === 'all',
+          run: () => {
+            this.source = 'all';
+            this.installFilter = 'all';
+            this.render();
+          },
+        },
+        { type: 'divider' },
+        { type: 'value', label: 'Add Games', run: (el) => addGamesMenu(el) },
       ],
     });
   }

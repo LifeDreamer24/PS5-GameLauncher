@@ -2,7 +2,7 @@
 // transparent always-on-top window above the game. Navigation targets
 // (Home, Library, Settings…) are opened in the launcher window instead.
 
-import { state, on, loadState, api } from './state.js';
+import { state, on, emit, loadState, api } from './state.js';
 import { setHandler, setGamepadPolling, externalAction } from './input.js';
 import { configureSound, unlockAudio, setSoundPacks, resetAudio } from './sound.js';
 import { topOverlay } from './ui/overlay.js';
@@ -97,6 +97,13 @@ async function main() {
     updateClock();
   });
   api.on('overlay:toast', (n) => toast({ ...n, sound: true }));
+  // Controller passthrough (the quick menu's controller rows show it).
+  const setPassthrough = (st) => {
+    state.passthrough = st || null;
+    emit('passthrough');
+  };
+  api.on('passthrough:state', setPassthrough);
+  api.passthroughStatus().then(setPassthrough).catch(() => {});
   // In-game sleep: close the audio output until the next menu or notification.
   on('sleep', (asleep) => asleep && resetAudio());
   api.on('overlay:close', () => {

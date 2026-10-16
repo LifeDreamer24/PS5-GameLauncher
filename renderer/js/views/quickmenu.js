@@ -2,18 +2,19 @@
 
 import { h, escapeHtml, clamp, timeAgo, bump } from '../util.js';
 import { icon } from '../icons.js';
-import { state, on, api, artUrl, sortGames, gamesIn, setSetting, lastActive, emit, currentGame } from '../state.js';
+import { state, on, api, artUrl, sortGames, gamesIn, setSetting, lastActive, emit, currentGame, activeDownloads, findGame, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
 import { mouseActive, connectedPads, rumble } from '../input.js';
 import { mountOverlay, FocusList, topOverlay } from '../ui/overlay.js';
 import { confirmDialog, sliderDialog, optionsMenu } from '../ui/dialogs.js';
 import { party, discordCmd, discordConnect, statusText, inCall, conversations } from '../discord.js';
 import { openChat } from '../ui/chat.js';
-import { launchGame } from '../ui/gameactions.js';
+import { launchGame, PAD_EMULATION as EMULATION, emulationName, controllerModeLabel, padEmulationLabel, pickControllerMode, pickPadEmulation } from '../ui/gameactions.js';
 import { tileArt } from '../ui/tiles.js';
 import { renderHints } from '../ui/glyphs.js';
 import { sliderHtml, setSlider, dragSlider } from '../ui/slider.js';
 import { t } from '../i18n.js';
+import { statusText as dlStatus, progressOf, fmtLeft, pulsing } from '../ui/downloads.js';
 import {
   sys,
   watchMedia,
@@ -67,13 +68,6 @@ export async function pickOutputDevice(anchor) {
 // Always shown; everything else can be hidden with "Customize".
 const FIXED = new Set(['home', 'game', 'notifications', 'settings', 'power']);
 
-// Controller passthrough: what the virtual controller is.
-const EMULATION = [
-  { value: 'dualsense', label: 'DualSense', hint: 'Touchpad, motion, PlayStation buttons' },
-  { value: 'dualshock4', label: 'DualShock 4', hint: 'For games that only know PS4 controllers' },
-  { value: 'xbox360', label: 'Xbox Controller', hint: 'Xbox buttons; no touchpad or motion' },
-];
-
 function sessionText(g) {
   const since = state.runningSince[g.id];
   if (!since) return 'Playing now';
@@ -105,6 +99,10 @@ export class QuickMenu {
     on('running', () => this.ctl && !this.customizing && !this.panel && this.refreshBar());
     on('settings', (k) => (k === null || k === 'qmHidden') && this.ctl && !this.customizing && !this.panel && this.refreshBar());
     on('notifications', () => this.ctl && this.updateBadge());
+    // Per-game settings (controller) changed from a menu: show them in the open panel.
+    on('games', () => this.ctl && this.panel && this.panel.nav.els.forEach((el) => this.renderRow(el)));
+    on('passthrough', () => this.ctl && this.panelIs('accessories') && this.panel.nav.els.forEach((el) => this.renderRow(el)));
+    on('downloads', () => this.ctl && this.onDownloads());
     on('media', () => this.ctl && this.onMedia());
     on('volume', () => this.ctl && this.refreshRows('sound'));
     on('outputs', () => this.ctl && this.refreshRows('sound'));
@@ -281,7 +279,7 @@ export class QuickMenu {
   }
 
   cardDefs() {
-    const games = gamesIn('game');
+    const games = gamesIn('game').filter(isInstalled);
     const cards = [];
     const playing = currentGame();
     if (playing) {
@@ -293,6 +291,22 @@ export class QuickMenu {
         title: playing.name,
         playing: true,
         run: () => this.openPanel(this.barIndex('game')),
+      });
+    }
+    // Steam updates under way: like the PS5's Downloads/Uploads card.
+    const dls = activeDownloads();
+    if (dls.length) {
+      const d = dls[0];
+      const g = d.gameId ? findGame(d.gameId) : null;
+      cards.push({
+        download: d.appid,
+        img: g ? artUrl(g, 'hero') || artUrl(g, 'banner') : null,
+        tile: g && !artUrl(g, 'hero') && !artUrl(g, 'banner') ? g : null,
+        icon: 'download',
+        cap: dls.length === 1 ? 'Downloads' : t('Downloads · {n}', { n: dls.length }),
+        title: d.name,
+        sub: ' ',
+        run: () => this.openPanel(this.barIndex('notifications')),
       });
     }
     const m = sys.media;
@@ -383,10 +397,11 @@ export class QuickMenu {
           c.logo ? h('img', { class: 'qc-logo', src: c.logo, alt: '' }) : null
         );
       }
+      if (c.download) img.append(h('div', { class: 'qc-dl-bar' }, h('i')));
       return h(
         'button',
         {
-          class: `qm-card fx${c.media ? ' media' : ''}${c.playing ? ' playing' : ''}${animate ? ' anim' : ''}`,
+          class: `qm-card fx${c.media ? ' media' : ''}${c.playing ? ' playing' : ''}${c.download ? ' download' : ''}${animate ? ' anim' : ''}`,
           style: { animationDelay: `${0.06 + i * 0.05}s` },
           onmouseenter: () => mouseActive() && this.focus('cards', i, true),
           onclick: () => c.run(),
@@ -407,13 +422,38 @@ export class QuickMenu {
     if (!wasFocused) this.cardNav.blur();
     this.cardSig = this.cardSignature();
     this.tickProgress();
+    this.paintDownloadCard();
+  }
+
+  /** The download card's bar and words, in place. */
+  paintDownloadCard() {
+    const i = this.cards ? this.cards.findIndex((c) => c.download) : -1;
+    if (i < 0 || !this.cardNav.els[i]) return;
+    const d = activeDownloads().find((x) => x.appid === this.cards[i].download);
+    if (!d) return;
+    const el = this.cardNav.els[i];
+    const bar = el.querySelector('.qc-dl-bar i');
+    if (bar) bar.style.width = `${Math.max(1, progressOf(d) * 100)}%`;
+    el.querySelector('.qc-dl-bar')?.classList.toggle('pulse', pulsing(d));
+    const sub = el.querySelector('.qc-sub');
+    if (sub) sub.textContent = [dlStatus(d), d.status === 'downloading' ? fmtLeft(d.eta) : ''].filter(Boolean).join(' · ');
+  }
+
+  onDownloads() {
+    if (!this.panel && this.cardSignature() !== this.cardSig) this.renderCards(false);
+    else this.paintDownloadCard();
+    if (this.panelIs('notifications')) {
+      const ids = activeDownloads().map((d) => d.appid).join(',');
+      if (ids !== this.panel.dlIds) this.rebuildPanel();
+      else this.panel.nav.els.forEach((el) => this.renderRow(el));
+    }
   }
 
   cardSignature() {
     const m = sys.media;
     const st = party.state;
     const p = inCall() ? `${st.channel.id}|${st.members.map((x) => `${x.id}${x.speaking ? '*' : ''}`).join(',')}` : 'no-party';
-    return (m && m.active ? `${m.app}|${m.key}|${m.status}|${sys.artKey}` : 'none') + '|' + p;
+    return (m && m.active ? `${m.app}|${m.key}|${m.status}|${sys.artKey}` : 'none') + '|' + p + '|' + activeDownloads().map((d) => d.appid).join(',');
   }
 
   open() {
@@ -562,7 +602,7 @@ export class QuickMenu {
       const el = h('button', {
         class: `qp-row fx fx-in t-${r.type || 'action'}${r.danger ? ' danger' : ''}`,
         onmouseenter: () => {
-          if (mouseActive() && this.panel) {
+          if (mouseActive() && this.panel && r.type !== 'section') {
             this.zone = 'panel';
             this.panel.nav.set(ri);
             this.applyFocus();
@@ -645,8 +685,9 @@ export class QuickMenu {
       const pw = panelEl.offsetWidth;
       panelEl.style.left = `${clamp(r.left + r.width / 2 - pw / 2, 24, window.innerWidth - pw - 24)}px`;
     }
-    const nav = new FocusList(rows, { index: rebuild ? Math.min(keepIndex, rows.length - 1) : 0 });
-    this.panel = { index: i, el: panelEl, nav, rows: def.rows, player };
+    const first = Math.max(0, def.rows.findIndex((r) => r.type !== 'section'));
+    const nav = new FocusList(rows, { index: rebuild ? Math.max(first, Math.min(keepIndex, rows.length - 1)) : first });
+    this.panel = { index: i, el: panelEl, nav, rows: def.rows, player, dlIds: def.dlIds };
     if (!rebuild) {
       this.zone = rows.length ? 'panel' : 'bar';
       if (def.onOpen) def.onOpen();
@@ -726,6 +767,23 @@ export class QuickMenu {
         .join('')}</span>`);
       return;
     }
+    // Greyed out (and skipped by up / down); section titles are never focused.
+    el.classList.toggle('disabled', r.type === 'section' || !!(typeof r.disabled === 'function' ? r.disabled() : r.disabled));
+    if (r.type === 'section') {
+      put(`<span class="qp-section">${escapeHtml(t(typeof r.label === 'function' ? r.label() : r.label))}</span>`);
+      return;
+    }
+    if (r.type === 'download') {
+      const d = r.download();
+      if (!d) return;
+      const g = d.gameId ? findGame(d.gameId) : null;
+      const img = g && gameIconUrl(g);
+      const left = d.status === 'downloading' ? fmtLeft(d.eta) : '';
+      put(
+        `<span class="qp-dl-cover">${img ? `<img src="${escapeHtml(img)}" alt="">` : icon('download')}</span><span class="qp-text"><span class="qp-label">${escapeHtml(d.name)}</span><span class="qp-dl-line"><span>${escapeHtml(dlStatus(d))}</span><span>${escapeHtml(left)}</span></span><span class="qp-dl-bar${pulsing(d) ? ' pulse' : ''}"><i style="width:${Math.max(d.status === 'downloading' ? 1 : 0, Math.round(progressOf(d) * 1000) / 10)}%"></i></span></span>`
+      );
+      return;
+    }
     if (r.type === 'member') {
       const m = r.member();
       if (!m) return;
@@ -751,6 +809,10 @@ export class QuickMenu {
   }
 
   async activateRow(r, el) {
+    if (typeof r.disabled === 'function' ? r.disabled() : r.disabled) {
+      sfx.bump();
+      return;
+    }
     if (r.type === 'toggle') {
       sfx.toggle(!(typeof r.value === 'function' ? r.value() : r.value));
       await r.toggle();
@@ -773,7 +835,8 @@ export class QuickMenu {
     } else if (r.run) {
       sfx.select();
       await r.run(el);
-      if (this.panel && el.isConnected) this.renderRow(el);
+      // Other rows can depend on this one (Controller › Emulated Controller).
+      if (this.panel && el.isConnected) this.panel.nav.els.forEach((x) => this.renderRow(x));
     }
   }
 
@@ -1012,6 +1075,21 @@ export class QuickMenu {
   }
 
   gamePanel(g) {
+    const game = () => state.games.find((x) => x.id === g.id) || g;
+    const pad = state.settings.controllerPassthrough
+      ? [
+          { icon: 'gamepad', label: 'Controller', value: () => controllerModeLabel(game()), chevron: true, run: (el) => pickControllerMode(game(), el) },
+          {
+            icon: 'gamepad',
+            label: 'Emulated Controller',
+            sub: () => (game().controllerMode === 'real' ? 'Not used with the real controller' : ''),
+            value: () => (game().controllerMode === 'real' ? '' : padEmulationLabel(game())),
+            disabled: () => game().controllerMode === 'real',
+            chevron: true,
+            run: (el) => pickPadEmulation(game(), el),
+          },
+        ]
+      : [];
     return {
       title: g.name,
       subtitle: sessionText(g),
@@ -1025,6 +1103,7 @@ export class QuickMenu {
             this.router.open('hub', { id: g.id });
           },
         },
+        ...pad,
         { icon: 'close', label: 'Close Game', danger: true, run: () => this.closeGame(g) },
       ],
     };
@@ -1092,16 +1171,31 @@ export class QuickMenu {
       value: `#${p.index + 1}`,
       run: () => rumble(0.8, 260),
     }));
-    // Controller passthrough: what games see the DualSense as.
+    // Controller passthrough: what games see the DualSense as. In a game that
+    // has its own choice (Options › Emulated Controller) that one shows, and
+    // changing it here changes it for that game.
     if (state.settings.controllerPassthrough) {
       const st = state.passthrough || {};
-      const label = () => (EMULATION.find((m) => m.value === (state.settings.passthroughEmulation || 'dualsense')) || EMULATION[0]).label;
+      const game = () => {
+        const g = currentGame();
+        return g && g.controllerMode !== 'real' ? g : null;
+      };
       rows.push({
         icon: 'gamepad',
         label: 'Emulate DualSense As',
-        sub: st.realGame ? t('Off while {name} uses the real controller', { name: st.realGame }) : 'What games see your controller as',
-        value: label,
+        sub: () => {
+          const g = game();
+          if (st.realGame) return t('Off while {name} uses the real controller', { name: st.realGame });
+          if (g) return g.padEmulation && g.padEmulation !== 'default' ? t('For {name}', { name: g.name }) : t('{name} uses the default', { name: g.name });
+          return 'What games see your controller as';
+        },
+        value: () => {
+          const g = game();
+          return g ? padEmulationLabel(g) : emulationName(state.settings.passthroughEmulation);
+        },
         run: async (el) => {
+          const g = game();
+          if (g) return pickPadEmulation(g, el);
           const cur = state.settings.passthroughEmulation || 'dualsense';
           const choice = await optionsMenu({
             title: 'Emulate DualSense As',
@@ -1207,17 +1301,35 @@ export class QuickMenu {
 
   notificationsPanel() {
     const list = state.notifications.slice(0, 8);
+    // Steam updates under way come first, with their progress (opens Downloads).
+    const dls = activeDownloads();
+    const dlRows = dls.length
+      ? [
+          { type: 'section', label: () => t('Downloads in progress: {n}', { n: activeDownloads().length }) },
+          ...dls.slice(0, 4).map((d) => ({
+            type: 'download',
+            download: () => activeDownloads().find((x) => x.appid === d.appid),
+            run: () => {
+              this.close();
+              this.router.open('downloads', { appid: d.appid });
+            },
+          })),
+          list.length ? { type: 'section', label: 'Notifications' } : null,
+        ].filter(Boolean)
+      : [];
     return {
-      title: 'Notifications',
+      title: dls.length ? 'Downloads and Notifications' : 'Notifications',
       empty: 'You have no notifications.',
+      dlIds: dls.map((d) => d.appid).join(','),
       onOpen: () => {
         state.notifications.forEach((n) => (n.read = true));
         this.updateBadge();
       },
-      rows: list.length
+      rows: list.length || dlRows.length
         ? [
+            ...dlRows,
             ...list.map((n) => ({ icon: n.icon || 'bell', label: n.title, sub: `${n.body ? `${t(n.body)} · ` : ''}${timeAgo(n.time)}`, run: () => {} })),
-            {
+            list.length ? {
               icon: 'trash',
               label: 'Clear All',
               run: () => {
@@ -1225,8 +1337,8 @@ export class QuickMenu {
                 this.updateBadge();
                 this.closePanel();
               },
-            },
-          ]
+            } : null,
+          ].filter(Boolean)
         : [],
     };
   }

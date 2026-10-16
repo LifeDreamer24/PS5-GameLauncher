@@ -966,6 +966,28 @@ class ObsBridge extends EventEmitter {
     return out.sort((a, b) => b.time - a.time);
   }
 
+  /** Mark a capture as a favourite (Media Gallery › Favorites). */
+  async setFavorite(file, on) {
+    const name = path.basename(String(file || ''));
+    if (!name || !(VIDEO_EXT.test(name) || IMAGE_EXT.test(name))) return false;
+    let e = this.index.find((x) => x.file === name);
+    if (!e) {
+      // A file the launcher didn't save itself: it gets an entry to remember this.
+      let time = Date.now();
+      try {
+        time = (await fsp.stat(path.join(this.dir, name))).mtimeMs;
+      } catch {
+        return false;
+      }
+      e = { file: name, type: IMAGE_EXT.test(name) ? 'screenshot' : 'video', game: name.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').replace(/^Clip\s*/i, '') || '', time, thumb: null };
+      this.index.push(e);
+    }
+    if (on) e.favorite = true;
+    else delete e.favorite;
+    this.save(this.indexFile, this.index);
+    return true;
+  }
+
   /** Delete a capture (to the Recycle Bin). */
   async remove(file) {
     const name = path.basename(String(file || ''));

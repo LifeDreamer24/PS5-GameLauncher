@@ -1333,35 +1333,7 @@ body[data-input="mouse"] .text-dialog .osk {
   opacity: 1;
 }
 
-/* Media Gallery ----------------------------------------------------------- */
-.gal-img {
-  position: relative;
-}
-
-.gal-img video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.gal-badge {
-  position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 1rem;
-  border-radius: 0.6rem;
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
-  font-size: 1.8rem;
-}
-
-.gal-badge .ic {
-  font-size: 1.6rem;
-}
-
+/* Media Gallery viewer (the gallery itself is in library.css) -------------- */
 .gallery-viewer {
   /* Same layer as other overlays: menus opened from it stack above it. */
   position: fixed;
@@ -1462,4 +1434,296 @@ body[data-input="mouse"] .text-dialog .osk {
 .gv-title span {
   font-size: 1.9rem;
   color: var(--text-3);
+}
+
+/* Sort / filter panel beside the round sort button (library, media gallery) */
+.fp-panel,
+.cm-panel {
+  position: absolute;
+  min-width: 41rem;
+  padding: 0.6rem 0 1.4rem;
+  border-radius: 0.6rem;
+  background: #1c1e25;
+  box-shadow: 0 2.4rem 7rem rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  opacity: 0;
+  transform: translateX(-1rem);
+  transition: opacity 0.2s var(--ease), transform 0.3s var(--ease-out);
+}
+
+.menu-overlay.open .fp-panel,
+.menu-overlay.open .cm-panel {
+  opacity: 1;
+  transform: none;
+}
+
+.menu-overlay.closing .fp-panel,
+.menu-overlay.closing .cm-panel {
+  opacity: 0;
+  transition-duration: 0.16s;
+}
+
+.fp-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.fp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3rem;
+  height: 8.2rem;
+  margin: 0 0.4rem;
+  padding: 0 2.8rem;
+  border-radius: 0.4rem;
+  font-size: 3rem;
+  font-weight: 300;
+  text-align: left;
+  transition: background 0.15s;
+  --fx-r: 0.4rem;
+}
+
+.fp-row.focused {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.fp-value {
+  font-size: 2.5rem;
+  color: var(--text-2);
+}
+
+.fp-divider {
+  display: block;
+  height: 1px;
+  margin: 1.2rem 2.8rem;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.fp-header {
+  padding: 1rem 3.2rem 0.6rem;
+  font-size: 2.5rem;
+  color: var(--text-3);
+}
+
+.fp-btn {
+  align-self: center;
+  width: calc(100% - 5.6rem);
+  height: 7.4rem;
+  margin-top: 1.6rem;
+  border-radius: 3.7rem;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 2.6rem;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+  --fx-r: 3.7rem;
+}
+
+.fp-btn.focused {
+  background: #fff;
+  color: #111;
+}
+
+.fp-btn.disabled {
+  color: var(--text-4);
+}
+
+.cm-panel {
+  min-width: 30rem;
+  padding: 0.6rem;
+}
+
+.cm-item {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  width: 100%;
+  height: 7.4rem;
+  padding: 0 1.8rem;
+  border-radius: 0.4rem;
+  font-size: 2.9rem;
+  font-weight: 300;
+  text-align: left;
+  transition: background 0.15s;
+  --fx-r: 0.4rem;
+}
+
+.cm-item.focused {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.cm-box {
+  width: 3.8rem;
+  height: 3.8rem;
+  border-radius: 0.6rem;
+  display: grid;
+  place-items: center;
+  font-size: 2.6rem;
+  color: transparent;
+  background: rgba(255, 255, 255, 0.28);
+  transition: background 0.15s, color 0.15s;
+}
+
+.cm-item.on .cm-box {
+  background: #fff;
+  color: #111;
+}
+
+/* Download a game (launcher's own "where to install", instead of Steam's dialog) */
+.install-dialog {
+  width: 92rem;
+}
+
+.id-head {
+  display: flex;
+  align-items: center;
+  gap: 2.6rem;
+}
+
+.id-cover {
+  position: relative;
+  flex: none;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 0.8rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.id-cover .tile-art {
+  position: absolute;
+  inset: 0;
+}
+
+.id-title {
+  min-width: 0;
+}
+
+.id-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 3rem;
+  margin-top: 1.2rem;
+  font-size: 2.1rem;
+  color: var(--text-3);
+}
+
+.id-sizes b {
+  margin-left: 0.6rem;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.id-label {
+  margin: 3.4rem 0 1.2rem;
+  font-size: 2.1rem;
+  color: var(--text-3);
+}
+
+.id-libs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.id-lib {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0 2rem;
+  padding: 1.8rem 2.2rem 2.4rem;
+  border-radius: 1.2rem;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.18s;
+  --fx-r: 1.2rem;
+}
+
+.id-lib.focused {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.id-lib.disabled {
+  opacity: 0.42;
+}
+
+.id-radio {
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 0.22rem rgba(255, 255, 255, 0.6);
+  display: grid;
+  place-items: center;
+}
+
+.id-radio i {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: #fff;
+  transform: scale(0);
+  transition: transform 0.2s var(--ease-out);
+}
+
+.id-lib.on .id-radio i {
+  transform: scale(1);
+}
+
+.id-drive {
+  font-size: 3rem;
+  color: var(--text-2);
+  display: grid;
+}
+
+.id-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.id-text b {
+  font-size: 2.5rem;
+  font-weight: 500;
+}
+
+.id-text em {
+  font-style: normal;
+  font-size: 1.8rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.id-free {
+  font-size: 2.1rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.id-bar {
+  position: absolute;
+  left: 2.2rem;
+  right: 2.2rem;
+  bottom: 1.1rem;
+  height: 0.4rem;
+  border-radius: 0.2rem;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.id-bar i {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.id-note {
+  margin-top: 2.4rem;
+  font-size: 2rem;
+}
+
+.install-dialog .dlg-btn.disabled {
+  opacity: 0.4;
 }

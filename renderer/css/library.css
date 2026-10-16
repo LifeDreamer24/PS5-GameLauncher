@@ -291,3 +291,537 @@
   opacity: 0;
 }
 
+
+/* A waiting update's badge goes left on library covers (the favourite star is right). */
+.lib-tile .tile-dl.available {
+  right: auto;
+  left: 1.2rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Downloads (PS5 Downloads/Uploads layout)                            */
+/* ------------------------------------------------------------------ */
+.dl-view {
+  background:
+    radial-gradient(60% 70% at 20% 0%, rgba(120, 110, 100, 0.22), transparent 60%),
+    linear-gradient(180deg, rgba(34, 33, 36, 0.96), rgba(22, 23, 27, 0.98));
+}
+
+.dl-title {
+  position: absolute;
+  top: 7.2rem;
+  left: 9.6rem;
+  font-size: 4.4rem;
+  font-weight: 300;
+  animation: fadeIn 0.5s var(--ease) both;
+}
+
+.dl-nav {
+  position: absolute;
+  top: 17.8rem;
+  left: 16.6rem;
+  width: 39.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  animation: fadeIn 0.5s var(--ease) 0.05s both;
+}
+
+.dl-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 10.4rem;
+  padding: 0 3rem;
+  border-radius: 0.4rem;
+  font-size: 3rem;
+  font-weight: 300;
+  color: var(--text-2);
+  text-align: left;
+  transition: color 0.2s, background 0.2s;
+  --fx-r: 0.4rem;
+  --fx-gap: 0.2rem;
+}
+
+.dl-nav-item.active {
+  color: #fff;
+}
+
+.dl-nav-item.focused {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.dl-count {
+  font-style: normal;
+  font-size: 2.6rem;
+}
+
+.dl-nav-sep {
+  display: block;
+  height: 1px;
+  margin: 1.4rem 3rem;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.dl-list-wrap {
+  position: absolute;
+  top: 17.8rem;
+  left: 65.6rem;
+  right: 18rem;
+  bottom: 12rem;
+  overflow: hidden auto;
+  padding: 0 1rem 2rem;
+}
+
+.dl-list-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.dl-group {
+  font-size: 2.4rem;
+  color: var(--text-2);
+  padding: 1.6rem 0 1.2rem;
+}
+
+.dl-group:not(:first-child) {
+  margin-top: 2.6rem;
+}
+
+.dl-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2.2rem;
+  width: 100%;
+  padding: 1.4rem;
+  border-radius: 0.6rem;
+  text-align: left;
+  animation: fadeUp 0.45s var(--ease-out) both;
+  transition: background 0.2s;
+  --fx-r: 0.6rem;
+  --fx-gap: 0.3rem;
+}
+
+.dl-row.focused {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dl-cover {
+  flex: none;
+  width: 12.8rem;
+  height: 12.8rem;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255, 255, 255, 0.06);
+  display: grid;
+  place-items: center;
+  font-size: 5rem;
+  color: var(--text-3);
+}
+
+.dl-cover .tile-art {
+  position: absolute;
+  inset: 0;
+}
+
+.dl-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.dl-name {
+  font-size: 3.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.4rem;
+}
+
+.dl-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  font-size: 2.3rem;
+  color: var(--text-2);
+}
+
+.dl-line span:last-child {
+  white-space: nowrap;
+}
+
+.dl-line2:has(span:empty + span:empty) {
+  display: none;
+}
+
+.dl-row.error .dl-state {
+  color: #ff9a9a;
+}
+
+.dl-bar {
+  margin-top: 1rem;
+  height: 0.5rem;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.dl-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: #fff;
+  transition: width 0.9s linear;
+}
+
+.dl-row.waiting .dl-bar i {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.dl-empty {
+  padding-top: 2rem;
+  font-size: 2.6rem;
+  color: var(--text-3);
+}
+
+.dl-hints {
+  position: absolute;
+  right: 7rem;
+  bottom: 4.4rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Media Gallery (the library's layout, 16:9 tiles in three columns)   */
+/* ------------------------------------------------------------------ */
+.gal-view {
+  background:
+    radial-gradient(70% 80% at 15% 20%, rgba(70, 80, 140, 0.2), transparent 60%),
+    linear-gradient(180deg, rgba(6, 8, 22, 0.9), rgba(3, 4, 12, 0.96));
+}
+
+.gal-view .gal-select {
+  top: 44.1rem;
+}
+
+.gal-sortlabel,
+.gal-album-title {
+  position: absolute;
+  top: 28.2rem;
+  font-size: 2.6rem;
+  color: var(--text-2);
+  animation: fadeIn 0.5s var(--ease) 0.1s both;
+}
+
+.gal-sortlabel {
+  right: 17.4rem;
+}
+
+.gal-album-title {
+  left: 17.4rem;
+  color: #fff;
+  font-size: 2.8rem;
+}
+
+.gal-view .gal-grid-wrap {
+  top: 30.8rem;
+}
+
+.gal-view .gal-grid {
+  grid-template-columns: repeat(3, 50.4rem);
+  gap: 3.3rem 3.2rem;
+}
+
+.gal-tile {
+  position: relative;
+  display: block;
+  width: 50.4rem;
+  height: 28.35rem;
+  border-radius: 0.6rem;
+  text-align: left;
+  --fx-r: 0.6rem;
+  --fx-gap: 0.5rem;
+  --fx-w: 0.3rem;
+  --glint: 0.3;
+  transition: transform 0.35s var(--ease-out);
+}
+
+.gal-grid.stagger .gal-tile {
+  animation: fadeUp 0.55s var(--ease-out) both;
+  animation-delay: calc(var(--i) * 26ms);
+}
+
+.gal-tile.focused {
+  transform: scale(1.02);
+}
+
+.gt-art {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0.8rem 2.4rem rgba(0, 0, 0, 0.35);
+}
+
+.gt-art > img,
+.gt-art > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+.gt-dur {
+  position: absolute;
+  top: 2.2rem;
+  left: 2.4rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.62);
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.gt-play {
+  position: absolute;
+  left: 2.4rem;
+  bottom: 2.2rem;
+  width: 3.8rem;
+  height: 3.8rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.7rem;
+  color: #1a1c22;
+  background: rgba(255, 255, 255, 0.86);
+  transition: opacity 0.25s var(--ease);
+}
+
+.gt-play svg {
+  margin-left: 0.25rem;
+  stroke-width: 0;
+}
+
+.gt-fav {
+  position: absolute;
+  top: 2rem;
+  right: 2rem;
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffd166;
+  font-size: 2rem;
+}
+
+/* Game and date, on the focused tile (always on albums) */
+.gt-info {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 6rem 2.4rem 2rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.55) 50%, rgba(0, 0, 0, 0.8) 100%);
+  opacity: 0;
+  transform: translateY(1rem);
+  transition: opacity 0.25s var(--ease), transform 0.35s var(--ease-out);
+}
+
+.gal-tile.focused .gt-info,
+.gt-info.always {
+  opacity: 1;
+  transform: none;
+}
+
+.gal-tile.focused .gt-play {
+  opacity: 0;
+}
+
+.gt-game {
+  font-size: 2.3rem;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gt-meta {
+  flex: none;
+  font-size: 1.9rem;
+  color: var(--text-2);
+}
+
+.gal-album .gt-info {
+  padding-left: 2.4rem;
+}
+
+.gal-hints {
+  position: absolute;
+  right: 7rem;
+  bottom: 4.4rem;
+}
+
+/* Select Media ------------------------------------------------------- */
+.sel-overlay {
+  background:
+    radial-gradient(70% 80% at 15% 20%, rgba(70, 80, 140, 0.2), transparent 60%),
+    linear-gradient(180deg, #060816, #03040c);
+  opacity: 0;
+  transition: opacity 0.25s var(--ease);
+}
+
+.sel-overlay.open {
+  opacity: 1;
+}
+
+.sel-title {
+  position: absolute;
+  top: 7.4rem;
+  left: 9.6rem;
+  font-size: 4.4rem;
+  font-weight: 300;
+}
+
+.sel-grid-wrap {
+  position: absolute;
+  top: 18.4rem;
+  left: 0;
+  width: 137rem;
+  bottom: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 2.2rem, #000 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 2.2rem, #000 100%);
+}
+
+.sel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 37rem);
+  gap: 3.3rem;
+  padding: 2.2rem 0 14rem 17.2rem;
+  transition: transform calc(0.45s * var(--spd)) var(--ease-out);
+}
+
+.sel-tile {
+  width: 37rem;
+  height: 20.8rem;
+}
+
+.sel-tile .gt-dur {
+  top: 1.8rem;
+  left: 7.4rem;
+}
+
+.sel-tile .gt-play {
+  left: 2rem;
+  bottom: 1.8rem;
+}
+
+.gt-check {
+  position: absolute;
+  top: 1.8rem;
+  left: 2rem;
+  width: 3.8rem;
+  height: 3.8rem;
+  border-radius: 0.6rem;
+  display: grid;
+  place-items: center;
+  font-size: 2.6rem;
+  color: transparent;
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 0 0 0.22rem rgba(255, 255, 255, 0.75);
+  transition: background 0.15s, color 0.15s;
+}
+
+.sel-tile.on .gt-check {
+  background: #fff;
+  color: #111;
+  box-shadow: none;
+}
+
+.sel-tile.on .gt-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 0.3rem rgba(255, 255, 255, 0.9);
+}
+
+.sel-side {
+  position: absolute;
+  top: 20.6rem;
+  left: 139.7rem;
+  width: 35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.4rem;
+}
+
+.sel-btn,
+.sel-count {
+  height: 7.2rem;
+  border-radius: 3.6rem;
+  display: grid;
+  place-items: center;
+  font-size: 2.8rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.15s, color 0.15s;
+  --fx-r: 3.6rem;
+}
+
+.sel-btn.focused {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.sel-btn.disabled,
+.sel-count {
+  color: var(--text-4);
+}
+
+.sel-side .sel-btn:last-child {
+  margin-top: 9.6rem;
+}
+
+/* Owned on Steam, not on this PC: the cover a little dimmed, a download mark. */
+.lib-tile.not-installed .lt-art .tile-art {
+  filter: saturate(0.55) brightness(0.72);
+  transition: filter 0.3s var(--ease);
+}
+
+.lib-tile.not-installed.focused .lt-art .tile-art {
+  filter: none;
+}
+
+.lt-cloud {
+  position: absolute;
+  left: 1.2rem;
+  top: 1.2rem;
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+/* A download already under way shows its bar instead. */
+.lib-tile:has(.tile-dl.active) .lt-cloud,
+.lib-tile:has(.tile-dl.available) .lt-cloud {
+  display: none;
+}

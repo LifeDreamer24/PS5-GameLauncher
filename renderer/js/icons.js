@@ -43,6 +43,10 @@ const P = {
   keyboard: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4M7 16h10"/>',
   sort: '<path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/>',
   filter: '<path d="M22 3H2l8 9.46V19l4 2v-8.54z"/>',
+  // PS5 media gallery: select several (two stacked frames, a tick in the front one)
+  selectMedia: '<rect x="7" y="7" width="14" height="14" rx="2.2"/><path d="M3.5 16V5.5a2 2 0 0 1 2-2H16"/><path d="m10.5 14 2.6 2.6 4.6-5"/>',
+  // A small "4K"-free, plain play mark for video tiles
+  playSolid: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',
   external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"/>',

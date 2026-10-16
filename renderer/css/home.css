@@ -933,3 +933,103 @@
 .hub-btn:not(.focused):hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Steam updates ----------------------------------------------------- */
+/* Under the hub buttons: what the update is doing and how far it is. */
+.hub-dl {
+  position: absolute;
+  left: 0;
+  top: 58.4rem;
+  width: 66rem;
+  display: none;
+  text-shadow: 0 0.2rem 1rem rgba(0, 0, 0, 0.6);
+}
+
+.hub-dl.show {
+  display: block;
+  animation: fadeIn 0.4s var(--ease) both;
+}
+
+.hdl-text {
+  display: flex;
+  align-items: baseline;
+  gap: 1.6rem;
+  font-size: 2.1rem;
+}
+
+.hdl-state {
+  color: #fff;
+}
+
+.hdl-info {
+  color: var(--text-2);
+}
+
+.hub-dl.error .hdl-state {
+  color: #ff9a9a;
+}
+
+.hdl-bar {
+  margin-top: 1.1rem;
+  height: 0.6rem;
+  border-radius: 0.3rem;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.hdl-bar i,
+.tile-dl i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: #fff;
+  transition: width 0.9s linear;
+}
+
+/* On game tiles: a progress bar while it downloads, a badge when one is waiting. */
+.tile-dl {
+  position: absolute;
+  left: 1.2rem;
+  right: 1.2rem;
+  bottom: 1.2rem;
+  height: 0.6rem;
+  border-radius: 0.3rem;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 0.15rem rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease);
+}
+
+.tile-dl.active {
+  opacity: 1;
+}
+
+.tile-dl.paused i {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.tile-dl.available {
+  opacity: 1;
+  left: auto;
+  bottom: auto;
+  top: 1.2rem;
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.tile-dl.available i {
+  display: none;
+}
+
+.tdl-ic {
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  color: #fff;
+}

@@ -13,6 +13,7 @@ const { OverlayManager } = require('./overlay');
 const { GameMonitor } = require('./gamemonitor');
 const { SoundPacks } = require('./soundpacks');
 const { ObsBridge } = require('./obs');
+const { SteamDownloads } = require('./steamdownloads');
 
 const DEFAULT_SETTINGS = {
   // Library
@@ -23,6 +24,10 @@ const DEFAULT_SETTINGS = {
   scanUbisoft: true,
   preferDirect: false,
   rescanOnStartup: true,
+  // Steam updates start as soon as one is out, instead of on Steam's own schedule
+  steamAutoUpdate: false,
+  // Steam games the account owns but hasn't installed show in the library (to download)
+  steamOwned: true,
   sgdbKey: '',
   artSource: 'steam',
   tileStyle: 'auto',
@@ -75,6 +80,7 @@ const DEFAULT_SETTINGS = {
   notif_library: 'notInGame',
   notif_system: 'always',
   notif_capture: 'always',
+  notif_downloads: 'always',
   // Captures (recording through OBS Studio, see main/obs.js)
   captureEnabled: false,
   captureDir: '', // '' = Videos\PS5 Game Launcher
@@ -322,6 +328,36 @@ function start() {
     },
   });
 
+  // Steam downloads: games needing an update, and update progress (main/steamdownloads.js).
+  // While Steam is asked to update a game it shows its window: the launcher stays in front of it.
+  let dlCover = false;
+  const downloads = new SteamDownloads({
+    library,
+    system,
+    monitor,
+    settings,
+    send,
+    hooks: {
+      cover: (on) => {
+        if (!win || win.isDestroyed()) return;
+        if (on) {
+          dlCover = launcherInFront();
+          if (dlCover) win.setAlwaysOnTop(true, 'screen-saver');
+        } else if (dlCover) {
+          dlCover = false;
+          if (!coverOn) win.setAlwaysOnTop(false);
+          system.focusWindow(overlay.hwndOf(win)).catch(() => {});
+        }
+      },
+      // Steam's install dialog is answered: back to the launcher (if it was the one in use).
+      focus: () => {
+        if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && !monitor.list().length) system.focusWindow(overlay.hwndOf(win)).catch(() => {});
+      },
+      // A game finished installing: the library picks it up as installed.
+      installed: () => library.scan({ silent: true }).catch(() => {}),
+    },
+  });
+
   // Guide / PS button (from the helper) and the keyboard shortcut.
   let lastGuide = 0;
   function onGuide() {
@@ -398,13 +434,42 @@ function start() {
     }
     return null;
   }
+  /* What the virtual controller is: the running game's own choice (Options ›
+     Emulated Controller), else Settings › Controllers. A game being started
+     counts already, so its controller is in place before it looks for one. */
+  let launchingPad = null; // { id, until }
+  function emulationFor() {
+    const own = (g) => (g && ['dualsense', 'dualshock4', 'xbox360'].includes(g.padEmulation) ? g.padEmulation : null);
+    for (const r of monitor.list().sort((a, b) => b.since - a.since)) {
+      const g = library.find(r.id);
+      if (g) return own(g) || settings.data.passthroughEmulation || 'dualsense';
+    }
+    if (launchingPad && Date.now() < launchingPad.until) {
+      const g = library.find(launchingPad.id);
+      if (own(g)) return own(g);
+    }
+    return settings.data.passthroughEmulation || 'dualsense';
+  }
+  let appliedEmulation = null;
+  function applyEmulation() {
+    const mode = emulationFor();
+    if (system.passthroughArgs) system.passthroughArgs = { ...system.passthroughArgs, mode };
+    if (!passthrough.enabled || mode === appliedEmulation) return;
+    appliedEmulation = mode;
+    system.request('passthroughConfig', { mode }).catch(() => {});
+  }
+
   let passthroughWant = null;
   async function applyPassthrough(force = true) {
     const real = settings.data.controllerPassthrough ? realControllerGame() : null;
     const want = !!settings.data.controllerPassthrough && !real;
-    if (!force && want === passthroughWant) return passthrough.state;
+    if (!force && want === passthroughWant) {
+      applyEmulation();
+      return passthrough.state;
+    }
     passthroughWant = want;
-    const args = { value: want, mode: settings.data.passthroughEmulation || 'dualsense' };
+    const args = { value: want, mode: emulationFor() };
+    appliedEmulation = args.mode;
     system.passthroughArgs = want ? args : null;
     let st = await system.request('passthrough', args, 15000).catch((err) => ({ enabled: false, error: err.message }));
     if (real) st = { ...st, realGame: real.name };
@@ -565,6 +630,7 @@ function start() {
     discord.start();
     overlay.create();
     monitor.start();
+    setTimeout(() => downloads.start().catch((err) => console.warn('[downloads]', err)), 2500);
     applyHotkey();
     applyCaptureButton();
     obs.onSettings().catch(() => {});
@@ -592,6 +658,7 @@ function start() {
 
   app.on('window-all-closed', () => {
     monitor.stop();
+    downloads.stop();
     system.stop();
     discord.close();
     settings.saveNow();
@@ -639,10 +706,7 @@ function start() {
       applyCaptureButton();
     }
     if ('controllerPassthrough' in patch) applyPassthrough();
-    else if ('passthroughEmulation' in patch) {
-      if (system.passthroughArgs) system.passthroughArgs = { ...system.passthroughArgs, mode: settings.data.passthroughEmulation };
-      system.request('passthroughConfig', { mode: settings.data.passthroughEmulation || 'dualsense' }).catch(() => {});
-    }
+    else if ('passthroughEmulation' in patch) applyEmulation();
 
     if ('fullscreen' in patch && win) {
       win.setFullScreen(!!patch.fullscreen);
@@ -656,7 +720,7 @@ function start() {
         app.setLoginItemSettings(opts);
       } catch {}
     }
-    const rescanKeys = ['scanSteam', 'scanEpic', 'scanXbox', 'scanUbisoft'];
+    const rescanKeys = ['scanSteam', 'scanEpic', 'scanXbox', 'scanUbisoft', 'steamOwned'];
     if (rescanKeys.some((k) => k in patch && patch[k] !== prev[k])) library.scan({ silent: true });
     return s;
   });
@@ -715,8 +779,10 @@ function start() {
 
   ipcMain.handle('game:update', (_e, id, patch) => {
     const r = library.update(id, patch || {});
-    // Switching a running game to / from the real controller applies right away.
+    // Switching a running game to / from the real controller (or its kind of
+    // virtual controller) applies right away.
     if (patch && 'controllerMode' in patch && settings.data.controllerPassthrough) applyPassthrough(false);
+    else if (patch && 'padEmulation' in patch) applyEmulation();
     return r;
   });
   ipcMain.handle('game:remove', (_e, id) => library.remove(id));
@@ -767,6 +833,9 @@ function start() {
     // Already running: bring it back instead of starting a second copy.
     if (monitor.get(id)) return continueGame(id);
     monitor.noteLaunch(id);
+    launchingPad = { id, until: Date.now() + 90000 };
+    applyEmulation();
+    setTimeout(applyEmulation, 91000); // it never showed up: back to the usual controller
     g.lastPlayed = Date.now();
     g.launchCount = (g.launchCount || 0) + 1;
     library.save();
@@ -922,7 +991,14 @@ function start() {
   const captureError = (title, err) => captureNote({ title, body: String((err && err.message) || err), icon: 'info' });
   ipcMain.handle('capture:state', () => obs.publicState());
   ipcMain.handle('capture:list', () => obs.list());
-  ipcMain.handle('capture:delete', (_e, file) => obs.remove(file));
+  // One file, or several (Media Gallery › Select Media).
+  ipcMain.handle('capture:delete', async (_e, file) => {
+    if (!Array.isArray(file)) return obs.remove(file);
+    let n = 0;
+    for (const f of file) if (await obs.remove(f).catch(() => false)) n++;
+    return n;
+  });
+  ipcMain.handle('capture:favorite', (_e, file, on) => obs.setFavorite(file, !!on));
   ipcMain.handle('capture:reveal', (_e, file) => shell.showItemInFolder(path.join(obs.dir, path.basename(String(file || '')))));
   ipcMain.handle('capture:openFolder', async () => {
     await fs.promises.mkdir(obs.dir, { recursive: true }).catch(() => {});
@@ -1030,6 +1106,28 @@ function start() {
   ipcMain.handle('discord:openChat', (_e, id) => discord.openChat(id));
   ipcMain.handle('discord:closeChat', () => discord.closeChat());
   ipcMain.handle('discord:openInDiscord', (_e, id, guild) => discord.openInDiscord(id, guild));
+
+  ipcMain.handle('downloads:state', () => downloads.publicState());
+  // Update a Steam game now (by library id or Steam app id).
+  ipcMain.handle('downloads:update', (_e, id) => {
+    const g = library.find(String(id || ''));
+    const appid = g ? g.steamAppId : id;
+    if (!appid) throw new Error('This game has no Steam app id.');
+    return downloads.update(appid);
+  });
+  // Install a Steam game the account owns (Steam's install dialog opens).
+  // library: the Steam library folder picked in the launcher (no Steam dialog); without it Steam's own dialog opens.
+  ipcMain.handle('downloads:install', (_e, id, library) => {
+    const g = library_(id);
+    return library ? downloads.installTo(g.steamAppId, library, { name: g.name, gameId: g.id }) : downloads.install(g.steamAppId, { name: g.name, gameId: g.id });
+  });
+  ipcMain.handle('downloads:installInfo', (_e, id) => downloads.installInfo(library_(id).steamAppId));
+  function library_(id) {
+    const g = library.find(String(id || ''));
+    if (!g || !g.steamAppId) throw new Error('This game has no Steam app id.');
+    return g;
+  }
+  ipcMain.handle('downloads:openSteam', () => shell.openExternal('steam://open/downloads'));
 
   ipcMain.handle('steam:search', (_e, term) => searchSteam(String(term || '')).catch(() => []));
 

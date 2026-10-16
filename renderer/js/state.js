@@ -13,6 +13,7 @@ export const state = {
   runningSince: {}, // gameId -> timestamp the session started
   notifications: [],
   scan: { active: false },
+  downloads: { items: [] }, // Steam updates (main/steamdownloads.js)
   window: { fullscreen: true, focused: true },
 };
 
@@ -69,6 +70,15 @@ export async function loadState() {
     emit('capture-state', s);
   });
   api.on('game:exited', (e) => emit('game-exited', e));
+  api.on('downloads:state', (d) => {
+    state.downloads = d || { items: [] };
+    emit('downloads');
+  });
+  api.downloadsState().then((d) => {
+    if (!d) return;
+    state.downloads = d;
+    emit('downloads');
+  }).catch(() => {});
   // A game is in front and nothing of ours is on screen: drop audio output and polling.
   api.on('app:sleep', (on) => {
     state.asleep = !!on;
@@ -106,7 +116,7 @@ export async function setSetting(key, value) {
 }
 
 /** Notification kinds, for Settings › Notifications. */
-export const NOTIFICATION_KINDS = ['discord', 'party', 'controller', 'game', 'capture', 'library', 'system'];
+export const NOTIFICATION_KINDS = ['discord', 'party', 'controller', 'game', 'capture', 'downloads', 'library', 'system'];
 
 function kindOf(n) {
   if (n.kind) return n.kind;
@@ -170,11 +180,27 @@ export function sortGames(list, mode) {
   return arr;
 }
 
+/** False for Steam games the account owns that aren't on this PC (they can be downloaded). */
+export function isInstalled(g) {
+  return !g || g.installed !== false;
+}
+
 export function homeGames(category) {
-  const list = gamesIn(category).filter((g) => !g.hidden);
+  const list = gamesIn(category).filter((g) => !g.hidden && isInstalled(g));
   return sortGames(list, state.settings.homeSort || 'recent').slice(0, state.settings.homeCount || 12);
 }
 
 export function findGame(id) {
   return state.games.find((g) => g.id === id);
+}
+
+/** A Steam update to do or under way for this game, or null. */
+export function downloadFor(game) {
+  if (!game || !game.steamAppId) return null;
+  return (state.downloads.items || []).find((d) => d.gameId === game.id || (!d.gameId && d.appid === String(game.steamAppId))) || null;
+}
+
+/** Downloads that are happening (not just updates waiting to be started). */
+export function activeDownloads() {
+  return (state.downloads.items || []).filter((d) => d.status !== 'available' && d.status !== 'error');
 }

@@ -743,3 +743,50 @@ html.windowed .boot {
 html.font-sst {
   --font: "SST", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }
+
+/* Download progress bars (PS5): while Steam is working, a soft glow runs along
+   the filled part to its end, about every second and a half. */
+.pulse {
+  overflow: visible !important;
+}
+
+.pulse > i {
+  position: relative;
+  background: #d3d5da;
+}
+
+.pulse > i::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: min(32%, 14rem);
+  height: 360%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #fff 0%, rgba(255, 255, 255, 0.9) 30%, rgba(255, 255, 255, 0.3) 65%, rgba(255, 255, 255, 0) 100%);
+  transform: translate(-100%, -50%);
+  opacity: 0;
+  pointer-events: none;
+  animation: barPulse 1.4s cubic-bezier(0.45, 0, 0.3, 1) infinite;
+}
+
+@keyframes barPulse {
+  0% {
+    left: 32%;
+    opacity: 0;
+  }
+  22% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 0.95;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+body.reduce-motion .pulse > i::after {
+  display: none;
+}

@@ -254,6 +254,11 @@ async function readSteamUser(steamPath) {
       for (const [id64, u] of Object.entries(users)) {
         if (!pick || getCI(u, 'MostRecent') === '1') pick = { id64, u };
       }
+      // The account Steam is (or was last) signed in with, when there are several.
+      const { steamAccounts } = require('./steamowned');
+      const { active } = await steamAccounts(steamPath);
+      const signedIn = active && Object.entries(users).find(([id64]) => (BigInt(id64) - 76561197960265728n).toString() === active);
+      if (signedIn) pick = { id64: signedIn[0], u: signedIn[1] };
       if (pick) {
         out.accountId = (BigInt(pick.id64) - 76561197960265728n).toString();
         out.persona = getCI(pick.u, 'PersonaName') || null;
@@ -296,7 +301,12 @@ async function readSteamUser(steamPath) {
   return out;
 }
 
-async function scanSteam() {
+/**
+ * Installed Steam games (from the appmanifests). With owned: also the games
+ * the account owns that aren't installed (main/steamowned.js), marked
+ * installed: false; they can be downloaded from the launcher.
+ */
+async function scanSteam({ owned = false } = {}) {
   const steamPath = await findSteamPath();
   if (!steamPath) return { found: false, games: [] };
 
@@ -350,10 +360,35 @@ async function scanSteam() {
         launch: { type: 'steam', appid, steamExe: path.join(steamPath, 'steam.exe'), target: `steam://rungameid/${appid}` },
         steamPlaytime: pt.minutes || 0,
         steamLastPlayed: pt.lastPlayed || Number(getCI(st, 'LastPlayed') || 0) * 1000 || 0,
+        installed: true,
       });
     }
   }
-  return { found: true, steamPath, persona: user.persona, games, playtime: user.playtime };
+  const installedCount = games.length;
+  if (owned) {
+    try {
+      const { ownedNotInstalled } = require('./steamowned');
+      const list = await ownedNotInstalled(steamPath, seen, { exclude: (id, name) => STEAM_EXCLUDED_IDS.has(id) || STEAM_EXCLUDED_NAMES.test(name) });
+      for (const a of list) {
+        const pt = user.playtime[a.appid] || {};
+        games.push({
+          id: `steam-${a.appid}`,
+          name: tidyName(a.name),
+          source: 'steam',
+          steamAppId: a.appid,
+          installDir: '',
+          sizeOnDisk: 0,
+          launch: { type: 'steam', appid: a.appid, steamExe: path.join(steamPath, 'steam.exe'), target: `steam://rungameid/${a.appid}` },
+          steamPlaytime: pt.minutes || 0,
+          steamLastPlayed: pt.lastPlayed || 0,
+          installed: false,
+        });
+      }
+    } catch (err) {
+      console.warn('[scan] owned Steam games', err.message);
+    }
+  }
+  return { found: true, steamPath, persona: user.persona, games, installedCount, playtime: user.playtime };
 }
 
 /* ------------------------------------------------------------------ */
@@ -550,4 +585,4 @@ async function scanXbox() {
   return { found: true, games };
 }
 
-module.exports = { scanFolder, scanSteam, scanEpic, scanUbisoft, scanXbox, findBestExe, describeFile, readSteamUser, findSteamPath, tidyName, hashId, similarity, EXE_SKIP };
+module.exports = { scanFolder, scanSteam, scanEpic, scanUbisoft, scanXbox, findBestExe, describeFile, readSteamUser, findSteamPath, tidyName, hashId, similarity, EXE_SKIP, STEAM_EXCLUDED_IDS, STEAM_EXCLUDED_NAMES };

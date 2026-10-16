@@ -95,8 +95,8 @@ class Library {
     const found = [];
     if (s.scanSteam) {
       try {
-        const steam = await scanner.scanSteam();
-        this.steamInfo = steam.found ? { path: steam.steamPath, persona: steam.persona, count: steam.games.length } : null;
+        const steam = await scanner.scanSteam({ owned: s.steamOwned !== false });
+        this.steamInfo = steam.found ? { path: steam.steamPath, persona: steam.persona, count: steam.installedCount, owned: steam.games.length - steam.installedCount } : null;
         found.push(...steam.games);
       } catch (err) {
         console.warn('[scan] steam failed', err);
@@ -142,11 +142,13 @@ class Library {
     if (pending.length) await this.fetchMetadata(pending);
 
     this.progress({ active: false });
-    if (!silent || added.length) {
-      if (added.length) {
+    // Owned Steam games that aren't installed join quietly (the library shows them as downloadable).
+    const fresh = added.filter((g) => g.installed !== false);
+    if (!silent || fresh.length) {
+      if (fresh.length) {
         this.notify(
-          added.length === 1 ? 'New game added' : `${added.length} new games added`,
-          added.slice(0, 3).map((g) => g.name).join(', ') + (added.length > 3 ? '…' : ''),
+          fresh.length === 1 ? 'New game added' : `${fresh.length} new games added`,
+          fresh.slice(0, 3).map((g) => g.name).join(', ') + (fresh.length > 3 ? '…' : ''),
           'library'
         );
       } else if (!silent) {
@@ -173,7 +175,7 @@ class Library {
       const g = byId.get(r.id);
       if (g) {
         const ownArgs = g.argsEdited && g.launch && g.launch.type === 'exe' ? g.launch.args : null;
-        for (const k of ['launch', 'direct', 'directSafe', 'storeId', 'altDirs', 'path', 'folder', 'installDir', 'exe', 'sizeOnDisk', 'steamPlaytime', 'steamLastPlayed']) {
+        for (const k of ['launch', 'direct', 'directSafe', 'storeId', 'altDirs', 'path', 'folder', 'installDir', 'exe', 'sizeOnDisk', 'steamPlaytime', 'steamLastPlayed', 'installed']) {
           if (r[k] !== undefined) g[k] = r[k];
         }
         // Arguments the user set for a shortcut/.exe game win over the shortcut's own.
@@ -439,8 +441,9 @@ class Library {
   update(id, patch) {
     const g = this.find(id);
     if (!g) return null;
-    const allowed = ['name', 'favorite', 'hidden', 'category', 'lastPlayed', 'launchCount', 'playtime', 'pauseMode', 'launchMode', 'controllerMode'];
+    const allowed = ['name', 'favorite', 'hidden', 'category', 'lastPlayed', 'launchCount', 'playtime', 'pauseMode', 'launchMode', 'controllerMode', 'padEmulation'];
     for (const k of allowed) if (k in patch) g[k] = patch[k];
+    if ('padEmulation' in patch && !['dualsense', 'dualshock4', 'xbox360'].includes(g.padEmulation)) delete g.padEmulation; // follows the setting
     if ('name' in patch) g.nameLocked = true;
     if (patch.launchArgs !== undefined) {
       if (g.launch && g.launch.type === 'exe') {

@@ -50,7 +50,10 @@ export function optionsMenu({ title = '', items, anchor = null, index = 0, side 
     );
     list.append(...els);
     const firstEnabled = items.findIndex((it) => !it.disabled);
-    const nav = new FocusList(els, { index: items[index] && !items[index].disabled ? index : Math.max(0, firstEnabled) });
+    const nav = new FocusList(els, {
+      index: items[index] && !items[index].disabled ? index : Math.max(0, firstEnabled),
+      onChange: (el) => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    });
     root.addEventListener('click', (e) => {
       if (e.target === root) close(null);
     });
@@ -117,6 +120,174 @@ export function optionsMenu({ title = '', items, anchor = null, index = 0, side 
       } finally {
         resolve(it);
       }
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Sort / filter panel (PS5 library and media gallery)                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The panel that opens beside the round sort button: "Sort by  Date", a line,
+ * "Filters", filter rows and a "Reset Filters" button. It stays open while
+ * choices are made (each row opens its own small menu) and closes with Back.
+ * rows(): [{ type: 'value', label, value?: () => string, run(el) },
+ *          { type: 'divider' }, { type: 'header', label },
+ *          { type: 'button', label, disabled?: () => bool, run() }]
+ */
+export function filterPanel({ anchor = null, rows }) {
+  return new Promise((resolve) => {
+    const list = h('div', { class: 'fp-list' });
+    const panel = h('div', { class: 'fp-panel' }, list);
+    const root = h('div', { class: 'overlay menu-overlay fp-overlay' }, panel);
+    let defs = [];
+    let nav = new FocusList([]);
+    let busy = false;
+
+    function render(keep = 0) {
+      defs = rows().filter(Boolean);
+      const els = [];
+      list.replaceChildren(
+        ...defs.map((r) => {
+          if (r.type === 'divider') return h('i', { class: 'fp-divider' });
+          if (r.type === 'header') return h('div', { class: 'fp-header', text: t(r.label) });
+          const disabled = !!(r.disabled && r.disabled());
+          const el =
+            r.type === 'button'
+              ? h('button', { class: `fp-btn fx${disabled ? ' disabled' : ''}`, text: t(r.label) })
+              : h(
+                  'button',
+                  { class: 'fp-row fx' },
+                  h('span', { class: 'fp-label', text: t(r.label) }),
+                  h('span', { class: 'fp-value', text: r.value ? t(r.value() || '') : '' })
+                );
+          const i = els.length;
+          el._def = r;
+          el.addEventListener('mouseenter', () => mouseActive() && !el.classList.contains('disabled') && nav.set(i));
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            nav.set(i);
+            choose();
+          });
+          els.push(el);
+          return el;
+        })
+      );
+      nav = new FocusList(els, { index: Math.min(keep, els.length - 1) });
+      if (nav.current && nav.current.classList.contains('disabled')) nav.move(-1) || nav.move(1);
+    }
+
+    async function choose() {
+      const el = nav.current;
+      if (!el || busy) return;
+      if (el.classList.contains('disabled')) return sfx.bump();
+      busy = true;
+      sfx.select();
+      try {
+        await el._def.run(el);
+      } finally {
+        busy = false;
+      }
+      if (!ctl.closed) render(nav.index);
+    }
+
+    render();
+    root.addEventListener('click', (e) => {
+      if (e.target === root) close();
+    });
+    requestAnimationFrame(() => {
+      const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : anchor;
+      const m = 16;
+      const pw = panel.offsetWidth;
+      const ph = panel.offsetHeight;
+      let x = rect ? rect.right + m * 0.6 : (window.innerWidth - pw) / 2;
+      let y = rect ? rect.top - m * 0.4 : (window.innerHeight - ph) / 2;
+      panel.style.left = `${clamp(x, m, window.innerWidth - pw - m)}px`;
+      panel.style.top = `${clamp(y, m, window.innerHeight - ph - m)}px`;
+    });
+
+    const ctl = mountOverlay(
+      root,
+      (action) => {
+        if (busy) return true;
+        if (action === 'up' || action === 'down') nav.move(action === 'up' ? -1 : 1) ? sfx.move() : sfx.bump();
+        else if (action === 'confirm' || action === 'right') choose();
+        else if (action === 'back' || action === 'options' || action === 'left') {
+          sfx.back();
+          close();
+        }
+        return true;
+      },
+      { dimApp: true }
+    );
+    sfx.open();
+
+    function close() {
+      ctl.close();
+      resolve();
+    }
+  });
+}
+
+/**
+ * Tick boxes beside the filter panel (Video Clips, Screenshots). Confirm ticks
+ * or unticks; onChange(items) runs after each change; Back closes.
+ */
+export function checkMenu({ items, anchor = null, onChange }) {
+  return new Promise((resolve) => {
+    const els = items.map((it, i) =>
+      h(
+        'button',
+        {
+          class: `cm-item fx${it.checked ? ' on' : ''}`,
+          onmouseenter: () => mouseActive() && nav.set(i),
+          onclick: (e) => {
+            e.stopPropagation();
+            nav.set(i);
+            toggle();
+          },
+        },
+        h('span', { class: 'cm-box', html: icon('check') }),
+        h('span', { class: 'cm-label', text: t(it.label) })
+      )
+    );
+    const panel = h('div', { class: 'cm-panel' }, ...els);
+    const root = h('div', { class: 'overlay menu-overlay cm-overlay' }, panel);
+    const nav = new FocusList(els);
+    root.addEventListener('click', (e) => {
+      if (e.target === root) close();
+    });
+    requestAnimationFrame(() => {
+      const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : anchor;
+      const m = 16;
+      const pw = panel.offsetWidth;
+      const ph = panel.offsetHeight;
+      const x = rect ? rect.right + m * 0.6 : (window.innerWidth - pw) / 2;
+      const y = rect ? rect.top - m * 0.4 : (window.innerHeight - ph) / 2;
+      panel.style.left = `${clamp(x, m, window.innerWidth - pw - m)}px`;
+      panel.style.top = `${clamp(y, m, window.innerHeight - ph - m)}px`;
+    });
+    function toggle() {
+      const it = items[nav.index];
+      it.checked = !it.checked;
+      nav.current.classList.toggle('on', it.checked);
+      sfx.toggle(it.checked);
+      onChange && onChange(items);
+    }
+    const ctl = mountOverlay(root, (action) => {
+      if (action === 'up' || action === 'down') nav.move(action === 'up' ? -1 : 1) ? sfx.move() : sfx.bump();
+      else if (action === 'confirm') toggle();
+      else if (action === 'back' || action === 'left' || action === 'options') {
+        sfx.back();
+        close();
+      }
+      return true;
+    });
+    sfx.open();
+    function close() {
+      ctl.close();
+      resolve(items);
     }
   });
 }

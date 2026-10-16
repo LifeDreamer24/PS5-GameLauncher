@@ -191,6 +191,9 @@ namespace PS5GameLauncher
                 case "resume": if (Bool(req, "wait")) Pad.WaitIdle(1500); return GameWin.Suspend(Int(req, "pid", 0), false);
                 case "resumeAll": GameWin.ResumeAll(); return true;
                 case "netConns": return Net.Established(Int(req, "pid", 0));
+                case "procIo": return Procs.Io(Str(req, "name"));
+                case "appWindows": return Procs.Windows(Str(req, "name"), Str(req, "title"));
+                case "windowCmd": return Procs.WindowCmd(Long(req, "hwnd"), Str(req, "action"));
                 case "procQos":
                     var pids = req.ContainsKey("pids") && req["pids"] is System.Collections.ArrayList ? ((System.Collections.ArrayList)req["pids"]).Cast<object>().Select(o => Convert.ToInt32(o)) : Enumerable.Empty<int>();
                     return Qos.Apply(pids, Bool(req, "eco"), Bool(req, "lower"), Bool(req, "trim"));
@@ -1569,7 +1572,8 @@ namespace PS5GameLauncher
             public Microsoft.Win32.SafeHandles.SafeFileHandle Write;
             public int OutLen;
             public byte Seq;
-            public bool AskedFull;
+            public int FullAsks;     // calibration reads tried (Bluetooth: switches to full reports)
+            public int LastFullAsk;
         }
 
         static int FeedbackSize(string kind)
@@ -1598,7 +1602,9 @@ namespace PS5GameLauncher
             v.Kind = emulation == "dualsense" ? (pid == "0df2" ? "dualsenseedge" : "dualsense") : emulation;
             // The real controller, opened for writing rumble / lightbar.
             v.Write = CreateFile(path, 0x40000000, 0x1 | 0x2, IntPtr.Zero, 3, 0, IntPtr.Zero);
-            v.OutLen = v.Bluetooth ? 78 : 48;
+            // Windows only takes writes as long as the device's longest output report
+            // (over Bluetooth that is 547 bytes), shorter ones padded.
+            v.OutLen = Math.Max(v.Write.IsInvalid ? 0 : Pad.OutputReportLength(v.Write), v.Bluetooth ? 78 : 48);
             return Attach(v);
         }
 
@@ -1676,18 +1682,24 @@ namespace PS5GameLauncher
 
         [DllImport("hid.dll")] static extern bool HidD_GetFeature(Microsoft.Win32.SafeHandles.SafeFileHandle h, byte[] buf, int len);
 
-        /// <summary>A Bluetooth DualSense sends short reports until its calibration report has been read.</summary>
+        /// <summary>
+        /// A Bluetooth DualSense sends short reports (no motion, no touchpad) until
+        /// its calibration report (0x05) has been read. Tried a few times, a second apart.
+        /// </summary>
         static void AskFullReports(Virtual v)
         {
-            v.AskedFull = true;
+            if (v.FullAsks >= 3 || Environment.TickCount - v.LastFullAsk < 1000) return;
+            v.FullAsks++;
+            v.LastFullAsk = Environment.TickCount;
             try
             {
                 using (var h = CreateFile(v.Path, 0x80000000 | 0x40000000, 0x1 | 0x2, IntPtr.Zero, 3, 0, IntPtr.Zero))
                 {
                     if (h.IsInvalid) return;
-                    var b = new byte[64];
+                    // Windows wants a buffer as long as the device's longest feature report.
+                    var b = new byte[Math.Max(Pad.FeatureReportLength(h), 64)];
                     b[0] = 0x05;
-                    HidD_GetFeature(h, b, 41);
+                    HidD_GetFeature(h, b, b.Length);
                 }
             }
             catch { }
@@ -1696,14 +1708,16 @@ namespace PS5GameLauncher
         static void PutU16(byte[] f, int at, int v) { f[at] = (byte)v; f[at + 1] = (byte)(v >> 8); }
 
         /// <summary>DualSense HID input report -> VIIPER's 33-byte DualSense state.</summary>
-        static byte[] State(byte[] b, int n)
+        static byte[] State(byte[] b, int n, bool bluetooth)
         {
             var f = new byte[33];
             int o;
             bool full;
-            if (b[0] == 0x01 && n >= 64) { o = 1; full = true; }          // USB
-            else if (b[0] == 0x31 && n >= 64) { o = 2; full = true; }     // Bluetooth, full report
-            else if (b[0] == 0x01 && n >= 10) { o = 1; full = false; }    // Bluetooth, short report
+            // Report id and connection decide the layout, never the length: Windows pads
+            // every report to the longest one, so Bluetooth's short report is 78 bytes too.
+            if (!bluetooth && b[0] == 0x01 && n >= 64) { o = 1; full = true; }     // USB
+            else if (bluetooth && b[0] == 0x31 && n >= 64) { o = 2; full = true; } // Bluetooth, full report
+            else if (bluetooth && b[0] == 0x01 && n >= 10) { o = 1; full = false; } // Bluetooth, short report
             else return null;
             int lx = b[o], ly = b[o + 1], rx = b[o + 2], ry = b[o + 3];
             int l2, r2, b0, b1, b2;
@@ -1763,8 +1777,8 @@ namespace PS5GameLauncher
             Virtual v;
             lock (Gate) Pads.TryGetValue(path, out v);
             if (v == null) return;
-            if (v.Bluetooth && !v.AskedFull && buf[0] == 0x01 && n < 64) AskFullReports(v);
-            var f = State(buf, n);
+            if (v.Bluetooth && buf[0] == 0x01) AskFullReports(v);
+            var f = State(buf, n, v.Bluetooth);
             if (f == null) return;
             v.Last = f;
             Push(v);
@@ -2390,6 +2404,38 @@ namespace PS5GameLauncher
             return result;
         }
 
+        /// <summary>Length of the device's longest output report (WriteFile wants buffers that long).</summary>
+        public static int OutputReportLength(Microsoft.Win32.SafeHandles.SafeFileHandle h)
+        {
+            IntPtr pre;
+            if (!HidD_GetPreparsedData(h, out pre)) return 0;
+            try
+            {
+                HIDP_CAPS caps;
+                return HidP_GetCaps(pre, out caps) == 0x00110000 ? caps.OutputReportByteLength : 0;
+            }
+            finally
+            {
+                HidD_FreePreparsedData(pre);
+            }
+        }
+
+        /// <summary>Length of the device's longest feature report (HidD_GetFeature wants buffers that long).</summary>
+        public static int FeatureReportLength(Microsoft.Win32.SafeHandles.SafeFileHandle h)
+        {
+            IntPtr pre;
+            if (!HidD_GetPreparsedData(h, out pre)) return 0;
+            try
+            {
+                HIDP_CAPS caps;
+                return HidP_GetCaps(pre, out caps) == 0x00110000 ? caps.FeatureReportByteLength : 0;
+            }
+            finally
+            {
+                HidD_FreePreparsedData(pre);
+            }
+        }
+
         /// <summary>PlayStation controllers being read right now: device path -> product id.</summary>
         public static Dictionary<string, string> PlayStationPaths()
         {
@@ -2459,12 +2505,14 @@ namespace PS5GameLauncher
                         HidD_FreePreparsedData(pre);
                     }
                     var buf = new byte[Math.Max(len, 16)];
+                    // Bluetooth: the HID-over-Bluetooth service in the path (its reports are longer, too).
+                    var bt = path.IndexOf("{00001124", StringComparison.OrdinalIgnoreCase) >= 0 || len > 64;
                     Passthrough.OnConnected(path, pid);
                     while (true)
                     {
                         int read;
                         if (!ReadFile(h, buf, len, out read, IntPtr.Zero) || read <= 0) break;
-                        var mask = ParsePs(buf, read, pid);
+                        var mask = ParsePs(buf, read, pid, bt);
                         if (mask >= 0) Update(src, mask);
                         Passthrough.OnReport(path, pid, buf, read);
                     }
@@ -2479,15 +2527,16 @@ namespace PS5GameLauncher
             }
         }
 
-        static int ParsePs(byte[] b, int n, string pid)
+        static int ParsePs(byte[] b, int n, string pid, bool bt)
         {
             var dualsense = pid == "0ce6" || pid == "0df2";
             int lx, ly, b0, b1, b2;
             if (dualsense)
             {
-                if (b[0] == 0x01 && n >= 64) { lx = 1; ly = 2; b0 = 8; b1 = 9; b2 = 10; }        // USB
-                else if (b[0] == 0x31 && n >= 12) { lx = 2; ly = 3; b0 = 9; b1 = 10; b2 = 11; }  // Bluetooth (full report)
-                else if (b[0] == 0x01 && n >= 8) { lx = 1; ly = 2; b0 = 5; b1 = 6; b2 = 7; }     // Bluetooth (simple report)
+                // By report id and connection: Windows pads Bluetooth's simple report to full length.
+                if (!bt && b[0] == 0x01 && n >= 64) { lx = 1; ly = 2; b0 = 8; b1 = 9; b2 = 10; }        // USB
+                else if (bt && b[0] == 0x31 && n >= 12) { lx = 2; ly = 3; b0 = 9; b1 = 10; b2 = 11; }   // Bluetooth (full report)
+                else if (bt && b[0] == 0x01 && n >= 8) { lx = 1; ly = 2; b0 = 5; b1 = 6; b2 = 7; }      // Bluetooth (simple report)
                 else return -1;
             }
             else
@@ -2639,6 +2688,109 @@ namespace PS5GameLauncher
             {
                 Marshal.FreeHGlobal(buf);
             }
+        }
+
+        /// <summary>
+        /// Disk and other I/O a program has done so far (bytes, since it started),
+        /// for every process with that name: the same SystemProcessInformation
+        /// read as List(), no handle opened. Steam downloads show up as its
+        /// writes (the update being staged), which its files don't report live.
+        /// </summary>
+        public static object Io(string name)
+        {
+            var list = new List<object>();
+            lock (ListGate)
+            {
+                for (var tries = 0; tries < 5; tries++)
+                {
+                    if (listBuf == IntPtr.Zero)
+                    {
+                        listLen = Math.Max(listLen, 1 << 20);
+                        listBuf = Marshal.AllocHGlobal(listLen);
+                    }
+                    int need;
+                    var st = NtQueryList(5, listBuf, listLen, out need);
+                    if (st == unchecked((int)0xC0000004))
+                    {
+                        Marshal.FreeHGlobal(listBuf);
+                        listBuf = IntPtr.Zero;
+                        listLen = Math.Max(need, listLen) + (256 << 10);
+                        continue;
+                    }
+                    if (st != 0 || IntPtr.Size != 8) break;
+                    // x64 SYSTEM_PROCESS_INFORMATION: the six IO_COUNTERS (LARGE_INTEGER) end the
+                    // fixed part at 0xD0: read/write/other operations, then read/write/other bytes.
+                    var p = listBuf;
+                    while (true)
+                    {
+                        var next = Marshal.ReadInt32(p);
+                        var len = (ushort)Marshal.ReadInt16(p, 0x38);
+                        var namePtr = Marshal.ReadIntPtr(p, 0x40);
+                        var pid = (int)Marshal.ReadIntPtr(p, 0x50).ToInt64();
+                        var n = namePtr == IntPtr.Zero ? "" : Marshal.PtrToStringUni(namePtr, len / 2);
+                        if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - 4);
+                        if (string.Equals(n, name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            list.Add(new Dictionary<string, object>
+                            {
+                                { "pid", pid },
+                                { "read", Marshal.ReadInt64(p, 0xE8) },
+                                { "write", Marshal.ReadInt64(p, 0xF0) },
+                                { "other", Marshal.ReadInt64(p, 0xF8) },
+                            });
+                        }
+                        if (next == 0) break;
+                        p += next;
+                    }
+                    break;
+                }
+            }
+            return list;
+        }
+
+        [DllImport("user32", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
+        [DllImport("user32")] static extern bool IsIconic(IntPtr h);
+        [DllImport("user32")] static extern bool ShowWindow(IntPtr h, int cmd);
+
+        /// <summary>Top-level windows of the processes with this name, with this title.</summary>
+        public static object Windows(string name, string title)
+        {
+            var pids = new HashSet<uint>();
+            foreach (var proc in System.Diagnostics.Process.GetProcessesByName(name ?? ""))
+            {
+                pids.Add((uint)proc.Id);
+                proc.Dispose();
+            }
+            var list = new List<object>();
+            EnumWindowsProc cb = (h, l) =>
+            {
+                uint owner;
+                GetWindowThreadProcessId(h, out owner);
+                if (!pids.Contains(owner)) return true;
+                var sb = new StringBuilder(256);
+                GetWindowText(h, sb, sb.Capacity);
+                if (!string.IsNullOrEmpty(title) && sb.ToString() != title) return true;
+                if (string.IsNullOrEmpty(title) && (sb.Length == 0 || sb.ToString() == "Default IME" || sb.ToString() == "MSCTFIME UI")) return true;
+                list.Add(new Dictionary<string, object> { { "hwnd", h.ToInt64() }, { "pid", (int)owner }, { "title", sb.ToString() }, { "visible", IsWindowVisible(h) }, { "minimized", IsIconic(h) } });
+                return true;
+            };
+            EnumWindows(cb, IntPtr.Zero);
+            GC.KeepAlive(cb);
+            return list;
+        }
+
+        [DllImport("user32", SetLastError = true, EntryPoint = "PostMessageW")] static extern bool PostMessageErr(IntPtr h, uint msg, IntPtr w, IntPtr l);
+
+        /// <summary>close: the window menu's Close (what its X does), minimize: minimized without focus.</summary>
+        public static object WindowCmd(long hwnd, string cmd)
+        {
+            var h = new IntPtr(hwnd);
+            bool ok;
+            if (cmd == "close") ok = PostMessageErr(h, 0x0112 /* WM_SYSCOMMAND */, new IntPtr(0xF060) /* SC_CLOSE */, IntPtr.Zero);
+            else if (cmd == "minimize") ok = ShowWindow(h, 7 /* SW_SHOWMINNOACTIVE */);
+            else return false;
+            if (ok) return true;
+            return new Dictionary<string, object> { { "ok", false }, { "error", Marshal.GetLastWin32Error() } };
         }
 
         /// <summary>Ask a process to close by sending WM_CLOSE to its visible windows.</summary>
