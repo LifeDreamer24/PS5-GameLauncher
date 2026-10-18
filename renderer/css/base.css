@@ -388,7 +388,9 @@ html.windowed .boot {
 .fx.sel::before {
   opacity: 1;
   transform: none;
-  animation: ringSpin 7s linear infinite;
+  /* 30 steps a second: the soft highlight looks the same, and the ring is
+     repainted half as often (it runs whenever the launcher is in front). */
+  animation: ringSpin 7s steps(210) infinite;
 }
 
 .fx.focused::after,

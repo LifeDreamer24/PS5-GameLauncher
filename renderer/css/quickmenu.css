@@ -855,6 +855,67 @@
   display: block;
 }
 
+/* DualSense battery on the Accessories icon (PS5 control center style) */
+.qm-batt {
+  position: absolute;
+  left: 50%;
+  bottom: 1rem;
+  width: 2.6rem;
+  height: 1.2rem;
+  margin-left: -1.4rem;
+  padding: 0.18rem;
+  border: 0.18rem solid currentColor;
+  border-radius: 0.35rem;
+  display: none;
+}
+
+.qm-batt::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -0.48rem;
+  width: 0.24rem;
+  height: 0.5rem;
+  margin-top: -0.25rem;
+  border-radius: 0 0.12rem 0.12rem 0;
+  background: currentColor;
+}
+
+.qm-batt i {
+  display: block;
+  width: var(--lvl, 0%);
+  height: 100%;
+  border-radius: 0.12rem;
+  background: currentColor;
+  transition: width 0.4s var(--ease-out);
+}
+
+.qm-accessories.has-batt .qm-batt {
+  display: block;
+}
+
+.qm-accessories.has-batt .qm-ic {
+  transform: translateY(-0.7rem);
+}
+
+.qm-batt.low i {
+  background: #e5484d;
+}
+
+.qm-batt.charging i {
+  animation: qmBattCharge 1.6s ease-in-out infinite;
+}
+
+@keyframes qmBattCharge {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.qm.customizing .qm-batt {
+  display: none !important;
+}
+
 /* Party card */
 .qc-img.qc-party {
   position: relative;

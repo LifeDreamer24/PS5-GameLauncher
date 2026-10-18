@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('api', {
   overlayToggle: invoke('overlay:toggle'),
   popupInGame: invoke('notify:popup'),
   passthroughStatus: invoke('passthrough:status'),
+  dualsenseInfo: invoke('dualsense:info'),
+  storageInfo: invoke('storage:info'),
+  storageDelete: invoke('storage:delete'),
   downloadsState: invoke('downloads:state'),
   downloadsUpdate: invoke('downloads:update'),
   downloadsInstall: invoke('downloads:install'),
@@ -95,7 +98,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'capture:state', 'app:sleep', 'downloads:state'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'app:sleep', 'downloads:state'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

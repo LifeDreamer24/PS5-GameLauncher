@@ -803,15 +803,24 @@ class SteamDownloads {
   }
 
   async restartSteamNow() {
-    if (await this.steamProcess()) {
-      await this.steamUrl('-shutdown');
-      let closed = false;
-      for (let i = 0; i < 60 && !closed; i++) {
-        await new Promise((r) => setTimeout(r, 500));
-        closed = !(await this.steamProcess());
-      }
-      if (!closed) throw new Error('Steam didn’t close. Close Steam, then try again.');
+    await this.stopSteam();
+    await this.startSteam();
+  }
+
+  /** Steam closed cleanly (if it was running). */
+  async stopSteam() {
+    if (!(await this.steamProcess())) return;
+    await this.steamUrl('-shutdown');
+    let closed = false;
+    for (let i = 0; i < 60 && !closed; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      closed = !(await this.steamProcess());
     }
+    if (!closed) throw new Error('Steam didn’t close. Close Steam, then try again.');
+  }
+
+  /** Steam started in the tray and signed in. */
+  async startSteam() {
     const since = Date.now() - 2000;
     await this.steamUrl('-silent');
     for (let i = 0; i < 120; i++) {
@@ -822,6 +831,68 @@ class SteamDownloads {
       }
     }
     throw new Error('Steam didn’t sign in. Open Steam and sign in, then try again.');
+  }
+
+  /**
+   * Uninstall games without Steam's dialog: Steam closes (it keeps its list of
+   * installed games in memory and would write a manifest back), each game's
+   * manifest and folders go (its files in steamapps\common, downloads, shader
+   * cache and workshop items, as Steam's own uninstall does), and Steam starts
+   * again in the tray if it was running. Cloud saves and userdata stay.
+   */
+  async uninstall(appids) {
+    if (!this.steamPath) throw new Error('Steam was not found.');
+    appids = [...new Set((appids || []).map(String))].filter((a) => /^\d+$/.test(a));
+    if (!appids.length) return [];
+    if (this.monitor.list().length) throw new Error('Close the game first: Steam restarts in the background to remove games.');
+    await this.findLibraries();
+    const targets = [];
+    for (const appid of appids) {
+      const busy = this.items().find((it) => it.appid === appid && ['starting', 'queued', 'downloading', 'installing'].includes(it.status));
+      if (busy) throw new Error('Stop its download in Steam first.');
+      for (const lib of this.libs) {
+        const manifest = path.join(lib, `appmanifest_${appid}.acf`);
+        if (!fs.existsSync(manifest)) continue;
+        let installdir = '';
+        try {
+          installdir = String(getCI(getCI(parseVdf(await fsp.readFile(manifest, 'utf8')), 'AppState') || {}, 'installdir') || '');
+        } catch {}
+        const common = path.join(lib, 'common');
+        const dir = installdir ? path.resolve(common, installdir) : null;
+        // Only ever a folder inside steamapps\common, never common itself.
+        const inside = dir && path.relative(common, dir) && !path.relative(common, dir).startsWith('..') && !path.isAbsolute(path.relative(common, dir));
+        targets.push({ appid, lib, manifest, dir: inside ? dir : null });
+      }
+    }
+    const wasRunning = await this.steamProcess();
+    this.restartingSteam = true;
+    this.publish(true);
+    const removed = [];
+    try {
+      await this.stopSteam();
+      for (const t of targets) {
+        const paths = [
+          t.manifest,
+          t.dir,
+          path.join(t.lib, 'downloading', t.appid),
+          path.join(t.lib, 'temp', t.appid),
+          path.join(t.lib, 'shadercache', t.appid),
+          path.join(t.lib, 'workshop', 'content', t.appid),
+          path.join(t.lib, 'workshop', `appworkshop_${t.appid}.acf`),
+        ].filter(Boolean);
+        for (const p of paths) await fsp.rm(p, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
+        if (!fs.existsSync(t.manifest)) removed.push(t.appid);
+      }
+    } finally {
+      try {
+        if (wasRunning) await this.startSteam();
+      } finally {
+        this.restartingSteam = false;
+        await this.readAllManifests().catch(() => {});
+        this.publish(true);
+      }
+    }
+    return removed;
   }
 
   /** Every visible titled window of Steam's interface. */

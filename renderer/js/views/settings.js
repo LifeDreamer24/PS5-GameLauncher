@@ -38,6 +38,8 @@ export class SettingsView {
     on('brightness', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('nightlight', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('bluetooth', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());
+    on('dualsense', () => this.active && this.cat && this.cat.id === 'accessories' && rerender());
+    on('storage', () => this.active && this.cat && this.cat.id === 'storage' && rerender());
     on('btscan', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());
     on('discord', () => this.active && this.cat && this.cat.id === 'users' && rerender());
   }
@@ -293,6 +295,8 @@ export class SettingsView {
         return `${label}${d.value !== undefined ? `<span class="si-value dim ${d.valueClass || ''}"><bdi>${escapeHtml(t(d.value))}</bdi></span>` : ''}<span class="si-chev">${icon('chevronRight')}</span>`;
       case 'info':
         return `${label}<span class="si-value dim">${escapeHtml(t(d.value ?? ''))}</span>`;
+      case 'drive':
+        return d.html();
     }
     return label;
   }
@@ -379,6 +383,7 @@ export class SettingsView {
         break;
       }
       case 'action':
+      case 'drive':
         sfx.select();
         await d.run(el);
         this.active && this.renderList(true);

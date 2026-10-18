@@ -11,6 +11,8 @@ import { emit, on } from '../state.js';
 import { LANGUAGES } from '../i18n.js';
 import { activeProfileId, pickProfileImage, updateProfile } from '../profiles.js';
 import { connectedPads } from '../input.js';
+import { refreshDualsense, modelName, powerLabel, batteryText, connectionLabel } from '../dualsense.js';
+import { loadStorage, storageItems } from './storage.js';
 import {
   sys,
   setVolume,
@@ -134,6 +136,48 @@ function outputItems() {
   ];
 }
 
+/* DualSense info ---------------------------------------------------- */
+// The same details DualSense Client shows on its device page.
+function dualsenseItems() {
+  const pads = state.dualsense || [];
+  if (!pads.length) return [{ type: 'info', label: 'No DualSense connected', value: 'Connect it with USB or Bluetooth' }];
+  const yes = (v, on, off) => (v === undefined ? 'Unknown' : v ? on : off);
+  const items = [];
+  pads.forEach((p, i) => {
+    const fw = p.firmware || {};
+    items.push(
+      { type: 'header', label: pads.length > 1 ? `${t(modelName(p))} ${i + 1}` : modelName(p) },
+      { type: 'info', label: 'Connection', value: connectionLabel(p) },
+      { type: 'info', label: 'Controller MAC', value: p.mac || 'Unknown' },
+      { type: 'info', label: 'Battery Level', value: batteryText(p) },
+      { type: 'info', label: 'Power State', value: p.power ? powerLabel(p) : 'Unknown' },
+      { type: 'info', label: 'Polling Rate', value: p.rate ? `${p.rate} Hz` : 'Measuring…' },
+      { type: 'header', label: 'Connection Status' },
+      { type: 'info', label: 'Headphones', value: yes(p.headphones, 'Connected', 'Not connected') },
+      { type: 'info', label: 'Microphone', value: yes(p.mic, 'Connected', 'Not connected') },
+      { type: 'info', label: 'Microphone Muted', value: yes(p.micMuted, 'Yes', 'No') },
+      { type: 'info', label: 'USB Data', value: yes(p.usbData, 'Active', 'Inactive') },
+      { type: 'info', label: 'USB Power', value: yes(p.usbPower, 'Connected', 'Not connected') },
+      { type: 'header', label: 'Firmware' }
+    );
+    if (!p.firmware) items.push({ type: 'info', label: 'Firmware Version', value: 'Unknown' });
+    else
+      items.push(
+        { type: 'info', label: 'Firmware Version', value: fw.version },
+        { type: 'info', label: 'Update Version', value: fw.update },
+        { type: 'info', label: 'Hardware', value: fw.generation ? t('Generation {n}', { n: fw.generation }) : 'Unknown' },
+        { type: 'info', label: 'Model Revision', value: fw.revision },
+        { type: 'info', label: 'Build Date', value: fw.buildDate },
+        { type: 'info', label: 'Build Time', value: fw.buildTime },
+        { type: 'info', label: 'SBL Firmware', value: fw.sbl },
+        { type: 'info', label: 'DSP Firmware', value: fw.dsp },
+        { type: 'info', label: 'MCU Firmware', value: fw.mcu }
+      );
+  });
+  items.push({ type: 'action', icon: 'refresh', label: 'Read Again', run: () => refreshDualsense() });
+  return items;
+}
+
 /* Controller passthrough ------------------------------------------- */
 function passthroughItems() {
   if (!state.settings.controllerPassthrough) return [];
@@ -148,16 +192,19 @@ function passthroughItems() {
     } else if (st.hidhide === 'denied') {
       value = 'HidHide refused access';
       note = 'HidHide only lets administrators change it on this PC. Hide your DualSense in the HidHide app yourself and add the launcher\'s syshelper.exe under Applications.';
+    } else if (st.viiper === 'nodriver') {
+      value = 'USB/IP driver missing';
+      note = 'The virtual controller needs the usbip-win2 driver. Install VIIPER, which brings it (see User Guide › Controller in Games), then turn this off and on again.';
     } else if (st.viiper === 'missing') {
-      value = 'VIIPER is not running';
-      note = 'Install VIIPER and let it start with Windows (see User Guide › Controller in Games).';
+      value = 'libVIIPER is missing';
+      note = 'This copy of the launcher came without libVIIPER.dll, which makes the virtual controller. Reinstall the launcher.';
     } else if (st.realGame) {
       value = 'Paused for this game';
       note = t('{name} uses the real controller, so passthrough is off while it runs. The game is paused whenever a menu is open instead.', { name: st.realGame });
     } else if (st.enabled) {
-      value = st.devices ? t(st.devices === 1 ? '1 controller' : '{n} controllers', { n: st.devices }) : 'Waiting for a DualSense';
+      value = st.devices ? t(st.devices === 1 ? '1 controller' : '{n} controllers', { n: st.devices }) : 'Waiting for a controller';
       cls = st.devices ? 'ok' : '';
-      note = 'Games now see a virtual DualSense that goes quiet while the quick menu or the launcher is in front. Your controller reconnects by itself once when this turns on, so games that had it open switch over. Choose Controller › Real Controller in a game’s options to keep HD haptics and adaptive triggers there.';
+      note = 'Games now see a virtual DualSense that goes quiet while the quick menu or the launcher is in front. What games send it reaches your controller: rumble, adaptive triggers, lights and HD haptics (over Bluetooth at a lower rate; the speaker only over USB). Your controller reconnects by itself once when this turns on, so games that had it open switch over.';
     } else if (st.error) value = st.error;
     // Programs on HidHide's own list still read the real controller (double input).
     if (st.enabled && st.allowed && st.allowed.length) {
@@ -171,6 +218,7 @@ function passthroughItems() {
   return [
     { type: 'info', label: 'Controller Passthrough', value, valueClass: cls },
     note ? { type: 'note', label: note } : null,
+    st && st.enabled && st.xbox ? { type: 'note', label: 'Xbox controllers: games that read them through XInput get a virtual Xbox controller that goes quiet while a menu is open. Games using Windows.Gaming.Input or GameInput still see your Xbox controller (Windows doesn’t let it be hidden from them), but they ignore it while a menu is in front. A game that was already running when this turned on keeps your Xbox controller until you restart it.' } : null,
     {
       type: 'choice',
       key: 'passthroughEmulation',
@@ -815,10 +863,13 @@ export function buildSchema(router) {
         {
           label: 'Controllers',
           items: () => {
-            const pads = connectedPads();
+            // With passthrough on the launcher doesn't use the browser's controller list (see input.js):
+            // DualSense controllers come from the helper then.
+            const pads = connectedPads().map((p) => ({ label: p.id.replace(/\s*\(.*\)\s*$/, '') || 'Gamepad', value: p.kind === 'ps' ? 'PlayStation' : 'Xbox / XInput' }));
+            if (!pads.length) for (const p of state.dualsense || []) pads.push({ label: modelName(p), value: 'PlayStation' });
             return [
               { type: 'header', label: 'Connected' },
-              ...(pads.length ? pads.map((p) => ({ type: 'info', label: p.id.replace(/\s*\(.*\)\s*$/, '') || 'Gamepad', value: p.kind === 'ps' ? 'PlayStation' : 'Xbox / XInput' })) : [{ type: 'info', label: 'No controllers detected', value: 'Press a button' }]),
+              ...(pads.length ? pads.map((p) => ({ type: 'info', label: p.label, value: p.value })) : [{ type: 'info', label: 'No controllers detected', value: 'Press a button' }]),
               {
                 type: 'choice',
                 key: 'prompts',
@@ -834,6 +885,7 @@ export function buildSchema(router) {
             ];
           },
         },
+        { label: 'DualSense', items: dualsenseItems, onEnter: () => refreshDualsense() },
         {
           label: 'Shortcuts',
           items: () => [
@@ -978,8 +1030,9 @@ export function buildSchema(router) {
       id: 'storage',
       label: 'Storage',
       icon: 'fStorage',
-      desc: 'Artwork cache and library data',
+      desc: 'Drives, installed games and library data',
       sections: [
+        { label: 'Games and Apps', items: storageItems, onEnter: () => loadStorage() },
         {
           label: 'Library Data',
           items: () => [

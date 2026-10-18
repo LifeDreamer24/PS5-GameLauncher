@@ -3,6 +3,7 @@
 // (Home, Library, Settings…) are opened in the launcher window instead.
 
 import { state, on, emit, loadState, api } from './state.js';
+import { initDualsense } from './dualsense.js';
 import { setHandler, setGamepadPolling, externalAction } from './input.js';
 import { configureSound, unlockAudio, setSoundPacks, resetAudio } from './sound.js';
 import { topOverlay } from './ui/overlay.js';
@@ -104,6 +105,7 @@ async function main() {
   };
   api.on('passthrough:state', setPassthrough);
   api.passthroughStatus().then(setPassthrough).catch(() => {});
+  initDualsense();
   // In-game sleep: close the audio output until the next menu or notification.
   on('sleep', (asleep) => asleep && resetAudio());
   api.on('overlay:close', () => {
@@ -114,7 +116,7 @@ async function main() {
   api.on('pad:action', (a) => {
     if (!a) return;
     if (typeof a === 'string') externalAction(a);
-    else externalAction(a.action, { repeat: !!a.repeat });
+    else externalAction(a.action, { repeat: !!a.repeat, kind: a.kind });
   });
 
   on('settings', applySettings);

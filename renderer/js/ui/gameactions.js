@@ -7,6 +7,7 @@ import { optionsMenu, confirmDialog, textDialog, matchDialog } from './dialogs.j
 import { mountOverlay } from './overlay.js';
 import { startUpdate, startInstall } from './downloads.js';
 import { t } from '../i18n.js';
+import { deleteGame, offersDelete } from '../views/storage.js';
 
 let launching = false;
 
@@ -257,6 +258,8 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
   }
   items.push(
     { label: 'Open File Location', icon: 'folder', run: () => api.openLocation(id) },
+    // Uninstall: the game's files go (Steam's way for Steam games), see Settings › Storage.
+    offersDelete(game) ? { label: 'Delete', icon: 'trash', danger: true, run: () => deleteGame(findGame(id) || game) } : null,
     {
       label: 'Remove from Library',
       icon: 'trash',
@@ -359,7 +362,7 @@ export function isRunning(game) {
 
 const CONTROLLER_MODES = [
   { value: 'virtual', label: 'Virtual Controller', hint: 'Ignores presses in menus' },
-  { value: 'real', label: 'Real Controller', hint: 'HD haptics, adaptive triggers' },
+  { value: 'real', label: 'Real Controller', hint: 'The game uses it directly' },
 ];
 
 /** What the virtual controller is shown to games as (Settings › Controllers sets the default). */

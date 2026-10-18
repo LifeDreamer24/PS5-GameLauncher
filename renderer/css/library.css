@@ -825,3 +825,299 @@
 .lib-tile:has(.tile-dl.available) .lt-cloud {
   display: none;
 }
+
+/* Settings › Storage › Games and Apps (PS5 "Items You Can Delete") -------- */
+.sel-overlay.ga-overlay {
+  background: none;
+}
+
+.settings-view > * {
+  transition: opacity 0.25s var(--ease);
+}
+
+body.ga-open .settings-view > :not(.set-bg) {
+  opacity: 0;
+}
+.ga-tabs {
+  position: absolute;
+  top: 18rem;
+  left: 16.8rem;
+  display: flex;
+  gap: 2.4rem;
+}
+
+.ga-tab {
+  font-size: 2.9rem;
+  border: 0.2rem solid transparent;
+}
+
+.ga-tab.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.ga-sortrow {
+  position: absolute;
+  top: 27.2rem;
+  left: 70rem;
+  width: 55.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3.2rem;
+}
+
+.ga-sortlabel {
+  font-size: 2.9rem;
+  font-weight: 300;
+  color: var(--text-2);
+}
+
+.ga-sort {
+  width: 38.4rem;
+  height: 6.4rem;
+  padding: 0 1.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 2.9rem;
+  font-weight: 300;
+  border-radius: 0.8rem 0.8rem 0 0;
+  box-shadow: inset 0 -0.2rem 0 rgba(255, 255, 255, 0.35);
+  --fx-r: 0.8rem;
+}
+
+.ga-sort svg {
+  width: 2.6rem;
+  height: 2.6rem;
+  color: var(--text-2);
+}
+
+.ga-sort.focused {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ga-list-wrap {
+  position: absolute;
+  top: 35.8rem;
+  left: 16.6rem;
+  width: 112rem;
+  bottom: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 1.6rem, #000 85%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 1.6rem, #000 85%, transparent 100%);
+}
+
+.ga-list {
+  padding: 1.2rem 0 16rem;
+  transition: transform calc(0.35s * var(--spd)) var(--ease-out);
+}
+
+.ga-row {
+  position: relative;
+  width: 100%;
+  height: 13rem;
+  padding: 0 2.6rem 0 2rem;
+  display: flex;
+  align-items: center;
+  gap: 2.4rem;
+  text-align: left;
+  border-radius: 1rem;
+  --fx-r: 1rem;
+}
+
+.ga-row::after {
+  content: '';
+  position: absolute;
+  left: 17.4rem;
+  right: 2.6rem;
+  bottom: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.ga-row.focused {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.ga-row.focused::after {
+  display: none;
+}
+
+.ga-check {
+  flex: none;
+  width: 4.2rem;
+  height: 4.2rem;
+  border-radius: 0.8rem;
+  display: grid;
+  place-items: center;
+  font-size: 2.8rem;
+  color: transparent;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.15s, color 0.15s;
+}
+
+.ga-row.on .ga-check {
+  background: #fff;
+  color: #111;
+}
+
+.ga-art {
+  flex: none;
+  width: 6.6rem;
+  height: 6.6rem;
+  border-radius: 0.6rem;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-3);
+  font-size: 3rem;
+}
+
+.ga-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ga-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.ga-name {
+  max-width: 100%;
+  font-size: 3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ga-badge {
+  padding: 0.1rem 1.1rem;
+  border-radius: 0.4rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #2a2d34;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.ga-why {
+  font-size: 2rem;
+  color: var(--text-3);
+}
+
+.ga-meta {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.8rem;
+  font-size: 2.5rem;
+  color: var(--text-2);
+}
+
+.ga-row.blocked .ga-check {
+  opacity: 0.25;
+}
+
+.ga-row.blocked .ga-art,
+.ga-row.blocked .ga-name,
+.ga-row.blocked .ga-meta {
+  opacity: 0.55;
+}
+
+.ga-empty {
+  position: absolute;
+  top: 44rem;
+  left: 21rem;
+  font-size: 2.8rem;
+  color: var(--text-3);
+}
+
+.ga-side {
+  position: absolute;
+  top: 27.4rem;
+  left: 136.4rem;
+  width: 38.8rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.ga-btn {
+  height: 7.2rem;
+  margin-bottom: 2.4rem;
+  border-radius: 3.6rem;
+  display: grid;
+  place-items: center;
+  font-size: 2.8rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background 0.15s, color 0.15s;
+  --fx-r: 3.6rem;
+}
+
+.ga-btn.focused {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.ga-btn.disabled {
+  color: var(--text-4);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.ga-meter {
+  margin-top: 19rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.ga-meter-name {
+  font-size: 2.5rem;
+}
+
+.ga-meter-bar {
+  position: relative;
+  height: 0.6rem;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.ga-meter-bar i,
+.ga-meter-bar b {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  transition: width 0.3s var(--ease-out), left 0.3s var(--ease-out);
+}
+
+.ga-meter-bar i {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+/* The part the ticked games free up */
+.ga-meter-bar b {
+  background: #4ea8ff;
+}
+
+.ga-meter-free {
+  align-self: flex-end;
+  font-size: 2.2rem;
+  color: var(--text-2);
+}
+
+.ga-selected {
+  margin: 5.4rem 0 4.6rem;
+  text-align: center;
+  font-size: 2.5rem;
+  color: var(--text-2);
+}

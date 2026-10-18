@@ -1,6 +1,6 @@
 import { $, h } from './util.js';
 import { state, on, emit, loadState, api, pushNotification } from './state.js';
-import { setHandler, externalAction, setGamepadPolling, setGamepadProbe } from './input.js';
+import { setHandler, externalAction, setGamepadPolling, setGamepadProbe, useGamepadApi } from './input.js';
 import { sfx, configureSound, setAmbient, unlockAudio, resetAudio, setSoundPacks } from './sound.js';
 import { background } from './background.js';
 import { heroBg } from './ui/herobg.js';
@@ -16,6 +16,7 @@ import { openSearch } from './views/search.js';
 import { GalleryView } from './views/gallery.js';
 import { runBoot } from './views/boot.js';
 import { loadDiscord } from './discord.js';
+import { initDualsense } from './dualsense.js';
 import { setLanguage, t, language } from './i18n.js';
 
 const viewsRoot = $('#views');
@@ -193,6 +194,8 @@ let quick = null;
 
 async function main() {
   await loadState();
+  // With controller passthrough the helper brings the controller's presses (see input.js).
+  if (!state.settings.controllerPassthrough) useGamepadApi();
   appliedLanguage = state.settings.language || 'auto';
   setLanguage(appliedLanguage);
   let reopen = null;
@@ -250,7 +253,7 @@ async function main() {
     const action = typeof a === 'string' ? a : a && a.action;
     if (action === 'guide') {
       if (!booting) externalAction('guide');
-    } else if (action && ((state.passthrough && state.passthrough.enabled) || padFallback)) externalAction(action, { repeat: !!(a && a.repeat) });
+    } else if (action && ((state.passthrough && state.passthrough.enabled) || padFallback)) externalAction(action, { repeat: !!(a && a.repeat), kind: a && a.kind });
   });
   // Passthrough just went off: until the browser sees the real controller
   // again (it reconnects), keep reading it through the helper.
@@ -273,16 +276,24 @@ async function main() {
       setPadFallback(false);
     } else if (was) {
       // Keep using the helper until the browser delivers a press itself.
+      useGamepadApi();
       setPadFallback(true);
       setGamepadProbe(() => {
         setPadFallback(false);
         setGamepadPolling(true);
       });
-    } else if (!padFallback) setGamepadPolling(true);
+    } else if (!padFallback) {
+      // Passthrough is off, or it couldn't start: the launcher reads controllers itself.
+      // (Right after startup it isn't on yet either; then it is about to start.)
+      const starting = state.settings.controllerPassthrough && st && !st.error && !['missing', 'nodriver', 'error', 'denied'].includes(st.viiper) && !['missing', 'denied', 'error'].includes(st.hidhide);
+      if (!starting) useGamepadApi();
+      setGamepadPolling(true);
+    }
     emit('passthrough');
   };
   api.on('passthrough:state', applyPassthrough);
   api.passthroughStatus().then(applyPassthrough).catch(() => {});
+  initDualsense();
   // Requests from the in-game overlay ("Home", "Game Library", closing a game…).
   api.on('navigate', (nav) => {
     if (!nav || booting) return;

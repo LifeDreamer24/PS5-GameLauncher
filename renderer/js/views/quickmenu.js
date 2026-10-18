@@ -14,6 +14,7 @@ import { tileArt } from '../ui/tiles.js';
 import { renderHints } from '../ui/glyphs.js';
 import { sliderHtml, setSlider, dragSlider } from '../ui/slider.js';
 import { t } from '../i18n.js';
+import { mainBattery, modelName, powerLabel, batteryText, connectionLabel } from '../dualsense.js';
 import { statusText as dlStatus, progressOf, fmtLeft, pulsing } from '../ui/downloads.js';
 import {
   sys,
@@ -102,6 +103,11 @@ export class QuickMenu {
     // Per-game settings (controller) changed from a menu: show them in the open panel.
     on('games', () => this.ctl && this.panel && this.panel.nav.els.forEach((el) => this.renderRow(el)));
     on('passthrough', () => this.ctl && this.panelIs('accessories') && this.panel.nav.els.forEach((el) => this.renderRow(el)));
+    on('dualsense', () => {
+      if (!this.ctl) return;
+      this.updateBattery();
+      if (this.panelIs('accessories')) this.rebuildPanel();
+    });
     on('downloads', () => this.ctl && this.onDownloads());
     on('media', () => this.ctl && this.onMedia());
     on('volume', () => this.ctl && this.refreshRows('sound'));
@@ -191,11 +197,13 @@ export class QuickMenu {
         it.id === 'notifications' ? h('span', { class: 'qm-badge' }) : null,
         it.id === 'music' ? h('span', { class: 'qm-eq', html: '<i></i><i></i><i></i>' }) : null,
         it.id === 'party' ? h('span', { class: 'qm-live' }) : null,
+        it.id === 'accessories' ? h('span', { class: 'qm-batt', html: '<i></i>' }) : null,
         this.customizing && !FIXED.has(it.id) ? h('span', { class: `qm-check${hidden.has(it.id) ? '' : ' on'}`, html: icon('check') }) : null
       );
       return el;
     });
     this.barRow.replaceChildren(...barEls);
+    this.updateBattery();
     const idx = Math.max(0, keepId ? this.items.findIndex((x) => x.id === keepId) : 0);
     this.barNav = new FocusList(barEls, { index: idx });
     if (this.el) {
@@ -1162,15 +1170,39 @@ export class QuickMenu {
     return { title: 'Bluetooth', rows, onOpen: () => loadBluetooth() };
   }
 
+  /** The DualSense battery on the Accessories icon, as in the PS5's control center. */
+  updateBattery() {
+    const el = this.barRow && this.barRow.querySelector('.qm-accessories .qm-batt');
+    if (!el) return;
+    const p = mainBattery();
+    el.parentElement.classList.toggle('has-batt', !!p);
+    if (!p) return;
+    el.style.setProperty('--lvl', `${Math.max(6, p.battery)}%`);
+    el.classList.toggle('low', p.battery <= 15 && p.power === 'discharging');
+    el.classList.toggle('charging', p.power === 'charging');
+  }
+
   accessoriesPanel() {
-    const pads = connectedPads();
-    const rows = pads.map((p) => ({
+    // DualSense controllers come with what they report (battery, connection);
+    // the browser's own entry for them (the virtual one, too) is left out.
+    const ds = state.dualsense || [];
+    const rows = ds.map((p) => ({
       icon: 'gamepad',
-      label: p.id.replace(/\s*\(.*\)\s*$/, '') || 'Controller',
-      sub: p.kind === 'ps' ? 'PlayStation controller' : 'Xbox / XInput controller',
-      value: `#${p.index + 1}`,
+      label: modelName(p),
+      sub: `${t(connectionLabel(p))} · ${t(p.power ? powerLabel(p) : 'Unknown')}`,
+      value: batteryText(p),
       run: () => rumble(0.8, 260),
     }));
+    const pads = connectedPads().filter((p) => !(ds.length && /product: 0?(ce6|df2)/i.test(p.id)));
+    rows.push(
+      ...pads.map((p) => ({
+        icon: 'gamepad',
+        label: p.id.replace(/\s*\(.*\)\s*$/, '') || 'Controller',
+        sub: p.kind === 'ps' ? 'PlayStation controller' : 'Xbox / XInput controller',
+        value: `#${p.index + 1}`,
+        run: () => rumble(0.8, 260),
+      }))
+    );
     // Controller passthrough: what games see the DualSense as. In a game that
     // has its own choice (Options › Emulated Controller) that one shows, and
     // changing it here changes it for that game.

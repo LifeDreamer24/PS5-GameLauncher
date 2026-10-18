@@ -435,3 +435,78 @@
   height: 2rem;
   border-width: 0.22rem;
 }
+
+/* Storage › Games and Apps: a drive card (PS5 console storage style) */
+.set-item.t-drive {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.6rem;
+  padding: 2.6rem 2.6rem 2.4rem;
+  min-height: 0;
+  margin-bottom: 1.2rem;
+}
+
+.sd-top,
+.sd-bottom {
+  display: flex;
+  align-items: baseline;
+  gap: 3.2rem;
+}
+
+.sd-name {
+  flex: 1;
+  font-size: 3rem;
+}
+
+.sd-size,
+.sd-free {
+  font-size: 2.4rem;
+  color: var(--text-2);
+}
+
+.sd-free {
+  margin-left: auto;
+}
+
+.sd-bar {
+  position: relative;
+  display: flex;
+  height: 0.7rem;
+  border-radius: 0.35rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.sd-bar i {
+  height: 100%;
+  transition: width 0.5s var(--ease-out);
+}
+
+.sd-bar .sd-games,
+.sd-dot.sd-games {
+  background: #4ea8ff;
+}
+
+.sd-bar .sd-other,
+.sd-dot.sd-other {
+  background: #dcdcdc;
+}
+
+.sd-key {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  font-size: 2.3rem;
+  color: var(--text-2);
+}
+
+.sd-key em {
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.sd-dot {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+}

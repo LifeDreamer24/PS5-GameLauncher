@@ -8,11 +8,11 @@
   "license": "MIT",
   "author": "Aris",
   "scripts": {
-    "start": "node scripts/build-native.js && electron .",
-    "dev": "node scripts/build-native.js && electron . --dev",
+    "start": "node scripts/build-native.js && node scripts/fetch-libviiper.js && electron .",
+    "dev": "node scripts/build-native.js && node scripts/fetch-libviiper.js && electron . --dev",
     "build:native": "node scripts/build-native.js --force",
-    "dist": "node scripts/build-native.js && electron-builder --win",
-    "dist:dir": "node scripts/build-native.js && electron-builder --win dir"
+    "dist": "node scripts/build-native.js && node scripts/fetch-libviiper.js && electron-builder --win",
+    "dist:dir": "node scripts/build-native.js && node scripts/fetch-libviiper.js && electron-builder --win dir"
   },
   "build": {
     "appId": "com.ps5gamelauncher.app",

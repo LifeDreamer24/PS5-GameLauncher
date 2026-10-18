@@ -464,6 +464,14 @@ class Library {
     this.save();
   }
 
+  /** Drop a game that is gone from the PC (deleted), without ignoring it in future scans. */
+  forget(id) {
+    if (!this.find(id)) return;
+    this.store.data.games = this.games.filter((x) => x.id !== id);
+    this.deleteArt(id);
+    this.save();
+  }
+
   restoreExcluded() {
     const n = this.store.data.excluded.length;
     this.store.data.excluded = [];

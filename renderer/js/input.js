@@ -200,8 +200,8 @@ export function setGamepadProbe(fn) {
 }
 
 /** Input that arrives from the main process (native controller reading). */
-export function externalAction(action, { repeat = false } = {}) {
-  setDevice('gamepad');
+export function externalAction(action, { repeat = false, kind = null } = {}) {
+  setDevice('gamepad', kind === 'ps' || kind === 'xbox' ? kind : undefined);
   if (repeat) fireRepeat(action);
   else fire(action, 'gamepad');
 }
@@ -289,22 +289,36 @@ function poll(now) {
   }
   requestAnimationFrame(poll);
 }
-requestAnimationFrame(poll);
 
-window.addEventListener('gamepadconnected', (e) => {
-  emit('gamepad', { connected: true, pad: e.gamepad, kind: kindOf(e.gamepad) });
-});
-window.addEventListener('gamepaddisconnected', (e) => {
-  prevButtons.delete(e.gamepad.index);
-  emit('gamepad', { connected: false, pad: e.gamepad, kind: kindOf(e.gamepad) });
-});
+/*
+ * The browser's Gamepad API starts only when the launcher reads controllers
+ * itself. Once a page touches it, Chromium reads every controller through
+ * Windows.Gaming.Input for good (even behind a game): with controller
+ * passthrough the virtual DualSense's ~1000 reports a second cost ~1.5% of
+ * the CPU there, while the helper already brings the controller's presses.
+ */
+let gamepadApi = false;
+
+export function useGamepadApi() {
+  if (gamepadApi) return;
+  gamepadApi = true;
+  window.addEventListener('gamepadconnected', (e) => {
+    emit('gamepad', { connected: true, pad: e.gamepad, kind: kindOf(e.gamepad) });
+  });
+  window.addEventListener('gamepaddisconnected', (e) => {
+    prevButtons.delete(e.gamepad.index);
+    emit('gamepad', { connected: false, pad: e.gamepad, kind: kindOf(e.gamepad) });
+  });
+  requestAnimationFrame(poll);
+}
 
 export function connectedPads() {
+  if (!gamepadApi) return [];
   return [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter((p) => p && p.connected).map((p) => ({ index: p.index, id: p.id, kind: kindOf(p) }));
 }
 
 export function rumble(strength = 0.25, duration = 40) {
-  if (device !== 'gamepad' || lastPad === null) return;
+  if (!gamepadApi || device !== 'gamepad' || lastPad === null) return;
   const pad = navigator.getGamepads()[lastPad];
   const act = pad && pad.vibrationActuator;
   if (!act || !act.playEffect) return;

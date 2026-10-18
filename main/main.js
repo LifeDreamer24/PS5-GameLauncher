@@ -14,6 +14,7 @@ const { GameMonitor } = require('./gamemonitor');
 const { SoundPacks } = require('./soundpacks');
 const { ObsBridge } = require('./obs');
 const { SteamDownloads } = require('./steamdownloads');
+const { Storage } = require('./storage');
 
 const DEFAULT_SETTINGS = {
   // Library
@@ -60,7 +61,7 @@ const DEFAULT_SETTINGS = {
   qmHidden: [],
   restoreOnExit: true,
   welcomeScreen: true,
-  // Controller passthrough: games get a virtual DualSense (needs HidHide + VIIPER)
+  // Controller passthrough: games get a virtual DualSense (needs HidHide + usbip-win2)
   controllerPassthrough: false,
   // What the DualSense is shown to games as: dualsense | dualshock4 | xbox360
   passthroughEmulation: 'dualsense',
@@ -409,14 +410,15 @@ function start() {
   };
   system.on('pad', (e) => {
     if (!e.action) return;
-    if (overlay.visible) overlay.send('pad:action', { action: e.action, repeat: !!e.repeat });
+    if (overlay.visible) overlay.send('pad:action', { action: e.action, repeat: !!e.repeat, kind: e.kind });
     // With controller passthrough the launcher reads the real controller
     // through the helper too (the virtual one is muted while it is in front).
-    else if ((passthrough.enabled || passthrough.fallback) && win && win.isFocused() && !win.isMinimized()) win.webContents.send('pad:action', { action: e.action, repeat: !!e.repeat });
+    else if ((passthrough.enabled || passthrough.fallback) && win && win.isFocused() && !win.isMinimized()) win.webContents.send('pad:action', { action: e.action, repeat: !!e.repeat, kind: e.kind });
   });
 
-  /* ---- Controller passthrough (HidHide + VIIPER) -------------------
-     Games get a virtual DualSense that the launcher feeds from the real one.
+  /* ---- Controller passthrough (HidHide + libVIIPER) ----------------
+     Games get a virtual DualSense that the launcher feeds from the real one
+     (the helper makes it with libVIIPER, see main/native/syshelper.cs).
      Whenever the launcher or the quick menu is in front it is muted, so the
      game can't react to the menu's button presses. */
   // fallback: passthrough just went off and the launcher window doesn't see
@@ -425,6 +427,20 @@ function start() {
   system.on('passthrough', (e) => {
     passthrough.state = e.state;
     send('passthrough:state', e.state);
+  });
+
+  /* DualSense info for Settings › Accessories and the quick menu's battery:
+     the helper reads it from the controllers it already listens to. */
+  let dualsense = [];
+  system.on('dualsense', (e) => {
+    dualsense = e.pads || [];
+    send('dualsense:state', dualsense);
+  });
+  // refresh: read firmware and MAC from the controllers again.
+  ipcMain.handle('dualsense:info', async (_e, refresh) => {
+    if (!refresh && dualsense.length) return dualsense;
+    dualsense = (await system.request('dualsenseInfo', { refresh: !!refresh }, 5000).catch(() => null)) || dualsense;
+    return dualsense;
   });
   /** A running game set to use the real controller (DualSense features): passthrough is off meanwhile. */
   function realControllerGame() {
@@ -979,7 +995,8 @@ function start() {
     passthrough.fallback = !!on;
     system.keepPadForward(passthrough.enabled || passthrough.fallback);
   });
-  ipcMain.handle('passthrough:status', () => passthrough.state || system.request('passthroughStatus', {}, 3000).catch(() => null));
+  // live: straight from the helper (its output counters), not the last state it announced.
+  ipcMain.handle('passthrough:status', (_e, live) => (!live && passthrough.state) || system.request('passthroughStatus', {}, 3000).catch(() => null));
 
   /* Captures (OBS) */
   const captureNote = (n) => send('notify', { icon: 'camera', kind: 'capture', ...n });
@@ -1128,6 +1145,11 @@ function start() {
     return g;
   }
   ipcMain.handle('downloads:openSteam', () => shell.openExternal('steam://open/downloads'));
+
+  /* Settings › Storage › Games and Apps: drives, installed games, deleting them. */
+  const storage = new Storage({ library, system, steam: downloads, monitor, settings, dataDir, send });
+  ipcMain.handle('storage:info', () => storage.info());
+  ipcMain.handle('storage:delete', (_e, ids) => storage.remove(Array.isArray(ids) ? ids : [ids]));
 
   ipcMain.handle('steam:search', (_e, term) => searchSteam(String(term || '')).catch(() => []));
 
