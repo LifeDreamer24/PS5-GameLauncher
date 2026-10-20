@@ -285,7 +285,7 @@ html.windowed .boot {
   opacity: 1;
 }
 
-#hero-bg.blur-art .hero-layer {
+#hero-bg .hero-layer.blur-art {
   inset: -12%;
   background-position: center;
   filter: blur(5rem) saturate(1.6) brightness(0.62);
