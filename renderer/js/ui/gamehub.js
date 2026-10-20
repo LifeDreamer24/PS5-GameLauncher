@@ -188,7 +188,7 @@ export class HubPanel {
       h('div', { class: 'hub-desc', text: t(games.length === 1 ? '1 game' : '{n} games', { n: games.length }) + (media.length ? ` · ${t(media.length === 1 ? '1 media app' : '{n} media apps', { n: media.length })}` : '') + ` ${t('in your collection')}` })
     );
     this.actionDefs = [
-      { label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library') },
+      { label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library', { tab: 'game' }) },
       { label: 'Add Games', icon: 'plus', run: (el) => addGamesMenu(el) },
     ];
     const recent = sortGames(games, 'added').slice(0, 4);
@@ -203,7 +203,7 @@ export class HubPanel {
           wrap.append(row);
           return wrap;
         },
-        run: () => this.host.openView('library', { sort: 'added' }),
+        run: () => this.host.openView('library', { tab: 'game', sort: 'added' }),
       });
     }
     this.cardDefs.push(
@@ -302,7 +302,7 @@ export class HubPanel {
         text: t('Keep apps like music, video and streaming services here. Open the options menu on any entry and choose “Move to Media”.'),
       })
     );
-    this.actionDefs = [{ label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library', { tab: 'game' }) }];
+    this.actionDefs = [{ label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library', { tab: 'media' }) }];
     this.cardDefs = [];
   }
 
