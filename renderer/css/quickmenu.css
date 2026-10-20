@@ -205,6 +205,8 @@
   transform: translate(-50%, 0);
 }
 
+/* Labels extend above the bar; fade them before its closing slide ends. */
+.qm.closing .qm-btn .qm-label,
 .qm.panel-open .qm-btn.focused .qm-label,
 .qm.panel-open .qm-btn .qm-label {
   opacity: 0;
