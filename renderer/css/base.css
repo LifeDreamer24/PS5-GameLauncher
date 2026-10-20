@@ -262,7 +262,7 @@ html.windowed .boot {
   opacity: 1;
 }
 
-.hero-motion .hero-layer.show {
+.hero-motion .hero-layer.drifting {
   animation: heroDrift 18s var(--ease-out) both;
 }
 
