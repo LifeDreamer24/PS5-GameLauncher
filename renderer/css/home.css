@@ -837,6 +837,14 @@
   box-shadow: 0 1.6rem 4rem rgba(0, 0, 0, 0.55);
 }
 
+/* Selection keeps the hero/layout; mouse hover alone controls its focus FX.
+   Keyboard/controller navigation still shows the focused tile's ring. */
+body[data-input="mouse"] .home-view .tile:not(:hover)::before,
+body[data-input="mouse"] .home-view .tile:not(:hover)::after {
+  opacity: 0;
+  animation: none;
+}
+
 .hub-btn {
   position: relative;
   --fx-r: 3.6rem;

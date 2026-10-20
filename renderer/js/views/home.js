@@ -210,6 +210,9 @@ export class HomeView {
         if (it.game && isRunning(it.game)) el.append(h('div', { class: 'tile-running' }));
         if (it.game && it.game.steamAppId) el.append(tileDownload(it.game));
         el._sig = sig;
+        el.addEventListener('mouseenter', () => {
+          if (mouseActive() && el._index === this.sel) this.focusZone('carousel', null, true);
+        });
         el.addEventListener('click', () => this.onTileClick(el));
       }
       el._index = i;
