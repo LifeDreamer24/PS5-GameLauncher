@@ -410,7 +410,7 @@ export class HomeView {
     if (it.type === 'game') this.hub.item && this.hub.item.key === it.key ? this.hub.activateAction(0) : launchGame(it.game);
     else if (it.type === 'library' || it.type === 'media-empty') {
       sfx.select();
-      this.router.open('library', { tab: this.tab === 'media' ? 'media' : 'game' });
+      this.router.open('library', { tab: it.type === 'media-empty' ? 'media' : 'game' });
     } else if (it.type === 'store') {
       sfx.select();
       api.openExternal('steam://store');
