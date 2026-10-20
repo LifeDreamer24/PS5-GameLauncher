@@ -144,8 +144,8 @@ export class HomeView {
     return i >= 0 ? i : 0;
   }
 
-  refresh(force = false) {
-    const prevKey = this.items[this.sel] && this.items[this.sel].key;
+  refresh(force = false, { selectedKey = null, instantLayout = false } = {}) {
+    const prevKey = selectedKey ?? this.items[this.sel]?.key;
     const items = this.buildItems();
     const sig =
       items.map((i) => `${i.key}|${i.game ? `${i.game.artVersion}|${i.game.name}|${isRunning(i.game)}` : ''}`).join(',') +
@@ -175,7 +175,7 @@ export class HomeView {
     if (idx < 0) idx = this.defaultIndex(items);
     this.sel = idx;
     this.renderTiles();
-    this.layout();
+    this.layout(instantLayout);
     this.updateTitle(false);
     const cur = this.items[this.sel];
     this.hub.setItem(cur, { animate: cur && cur.key !== this.hubKey });
@@ -239,11 +239,12 @@ export class HomeView {
     this.select(i);
   }
 
-  layout() {
+  layout(instant = false) {
     const k = SMALL / BIG;
     this.items.forEach((it, i) => {
       const el = this.tileEls.get(it.key);
       if (!el) return;
+      if (instant) el.style.transition = 'none';
       let x;
       let s = k;
       if (i === this.sel) {
@@ -256,6 +257,11 @@ export class HomeView {
       el.classList.toggle('off', x < -SMALL || x > 260);
       el.classList.toggle('before', i < this.sel);
     });
+    if (instant) {
+      // Commit final positions before playing the shared tab-entry animation.
+      void this.carousel.offsetWidth;
+      this.tileEls.forEach((el) => (el.style.transition = ''));
+    }
   }
 
   updateTitle(animate = true) {
@@ -360,9 +366,7 @@ export class HomeView {
       this.sig = null;
       const want = this.selByTab[tab];
       this.items = [];
-      this.refresh(true);
-      const idx = want ? this.items.findIndex((i) => i.key === want) : -1;
-      if (idx >= 0 && idx !== this.sel) this.select(idx, { sound: false });
+      this.refresh(true, { selectedKey: want, instantLayout: true });
       this.carousel.classList.remove('switching');
       this.titleEl.classList.remove('switching');
       // Stagger outward from the restored selection, not the start of the library.
