@@ -216,7 +216,11 @@ export class HomeView {
         el.addEventListener('click', () => this.onTileClick(el));
       }
       el._index = i;
-      el.style.setProperty('--i', i);
+      // Media updates can rebuild this row during tab entry. Keep an existing
+      // tile's stagger intact; new tiles start relative to the current selection.
+      if (!this.carousel.classList.contains('tab-in') || !el.style.getPropertyValue('--i')) {
+        el.style.setProperty('--i', Math.abs(i - this.sel));
+      }
       keep.set(it.key, el);
       frag.append(el);
     });
