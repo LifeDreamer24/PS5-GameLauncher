@@ -361,6 +361,11 @@ export class HomeView {
       if (idx >= 0 && idx !== this.sel) this.select(idx, { sound: false });
       this.carousel.classList.remove('switching');
       this.titleEl.classList.remove('switching');
+      // Stagger outward from the restored selection, not the start of the library.
+      // Snapshot the order here so moving selection mid-animation cannot retime it.
+      this.items.forEach((it, i) => {
+        this.tileEls.get(it.key)?.style.setProperty('--i', Math.abs(i - this.sel));
+      });
       replayClass(this.carousel, 'tab-in');
     }, 170);
   }
