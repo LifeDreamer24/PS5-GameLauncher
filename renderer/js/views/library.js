@@ -450,6 +450,9 @@ export class LibraryView {
     const keep = dir === 'back' || !!params.keep;
     if (params.tab && params.tab !== this.tab) this.tab = params.tab;
     if (params.sort) this.sort = params.sort;
+    if (!keep || params.tab) {
+      this.tabNav.set(TABS.findIndex((tab) => tab.key === this.tab), { silent: true });
+    }
     if (!keep) {
       this.zone = 'grid';
       this.gridNav = null;
