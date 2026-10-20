@@ -274,7 +274,7 @@ export class QuickMenu {
     this.items = this.barItems(hidden);
     setSetting('qmHidden', hidden);
     this.el.classList.remove('customizing');
-    renderHints(this.hints, [['options', 'Edit']]);
+    renderHints(this.hints, [['options', 'Customize']]);
     this.renderBar(id);
   }
 
@@ -488,7 +488,7 @@ export class QuickMenu {
     this.renderBar('home');
     this.panelHost = h('div', { class: 'qm-panel-host' });
     this.hints = h('div', { class: 'qm-hints' });
-    renderHints(this.hints, [['options', 'Edit']]);
+    renderHints(this.hints, [['options', 'Customize']]);
     this.el = h(
       'div',
       { class: `overlay qm${this.overlay ? ' in-game' : ''}` },
