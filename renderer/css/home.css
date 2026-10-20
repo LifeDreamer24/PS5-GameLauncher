@@ -167,6 +167,30 @@
   box-shadow: 0 0 0 0.38rem #fff, 0 0 3.4rem rgba(255, 255, 255, 0.28), 0 1.6rem 4rem rgba(0, 0, 0, 0.55);
 }
 
+.tile.sel.focused .tile-inner {
+  animation: tilePop calc(0.45s * var(--spd)) var(--ease-out);
+}
+
+/* Keep the same entry animation alive when focus adds/removes the pop.
+   Entry uses translate; pop/press use transform, so they compose. */
+.carousel.tab-in .tile.sel.focused .tile-inner {
+  animation: tileIn calc(0.55s * var(--spd)) var(--ease-out) both,
+    tilePop calc(0.45s * var(--spd)) var(--ease-out);
+  animation-delay: calc(var(--i) * 30ms), 0s;
+}
+
+.carousel.tab-in .tile .tile-inner.press {
+  animation: tileIn calc(0.55s * var(--spd)) var(--ease-out) both,
+    tilePress 0.32s var(--ease) !important;
+  animation-delay: calc(var(--i) * 30ms), 0s !important;
+}
+
+@keyframes tilePop {
+  0% { transform: scale(0.94); }
+  60% { transform: scale(1.025); }
+  100% { transform: scale(1); }
+}
+
 .tile-inner.press {
   animation: tilePress 0.32s var(--ease) !important;
 }
@@ -177,8 +201,8 @@
 }
 
 @keyframes tileIn {
-  from { opacity: 0; transform: translateX(14rem); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; translate: 14rem 0; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 /* Boot build-in (HomeView.playBootIntro): everything but the tiles waits,
