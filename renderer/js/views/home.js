@@ -320,7 +320,8 @@ export class HomeView {
       sfx.bump();
       rumble(0.3);
       const el = this.tileEls.get(this.items[this.sel]?.key);
-      bump(el?.firstElementChild, d < 0 ? 'left' : 'right');
+      // Edge feedback moves the outer tile; inner pop/entry animations keep running.
+      bump(el, d < 0 ? 'left' : 'right');
     }
   }
 
