@@ -75,9 +75,11 @@ export const heroBg = {
     const next = layers[active ^ 1];
     const prev = layers[active];
     next.style.backgroundImage = `url("${url}")`;
-    next.classList.remove('show');
+    // Restart only the incoming layer. The outgoing layer keeps its drift
+    // while opacity fades, so it never snaps back to its unscaled artwork.
+    next.classList.remove('show', 'drifting');
     void next.offsetWidth;
-    next.classList.add('show');
+    next.classList.add('show', 'drifting');
     prev.classList.remove('show');
     active ^= 1;
     root.classList.add('has-image');
