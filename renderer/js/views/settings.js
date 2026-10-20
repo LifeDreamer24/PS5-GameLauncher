@@ -116,6 +116,7 @@ export class SettingsView {
     }
     if (instant) this.rootList.style.transition = 'none';
     this.rootList.style.transform = `translateY(${-y}px)`;
+    this.rootWrap.classList.toggle('fade-top', y > 4);
     if (instant) {
       void this.rootList.offsetWidth;
       this.rootList.style.transition = '';
