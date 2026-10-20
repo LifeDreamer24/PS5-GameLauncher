@@ -6,6 +6,7 @@ const root = document.getElementById('hero-bg');
 const layers = [...root.querySelectorAll('.hero-layer')];
 let active = 0;
 let current = null;
+let currentBlur = false;
 let token = 0;
 const tintCache = new Map();
 const appEl = document.getElementById('app');
@@ -50,9 +51,10 @@ function load(url) {
 
 export const heroBg = {
   async set(url, { blur = false } = {}) {
-    root.classList.toggle('blur-art', !!blur);
-    if (url === current) return;
+    blur = !!blur;
+    if (url === current && blur === currentBlur) return;
     current = url;
+    currentBlur = blur;
     const my = ++token;
     if (!url) {
       layers.forEach((l) => l.classList.remove('show'));
@@ -75,6 +77,8 @@ export const heroBg = {
     const next = layers[active ^ 1];
     const prev = layers[active];
     next.style.backgroundImage = `url("${url}")`;
+    // Keep each image's treatment through its entire fade, including hide().
+    next.classList.toggle('blur-art', blur);
     // Restart only the incoming layer. The outgoing layer keeps its drift
     // while opacity fades, so it never snaps back to its unscaled artwork.
     next.classList.remove('show', 'drifting');
@@ -93,7 +97,6 @@ export const heroBg = {
   },
   hide() {
     this.set(null);
-    root.classList.remove('blur-art');
     this.deep(false);
   },
   setMotion(on) {
