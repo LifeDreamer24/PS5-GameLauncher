@@ -286,6 +286,21 @@ export class HubPanel {
     if (!this.item || this.item.type !== 'nowplaying') return;
     const m = sys.media;
     if (!m || !m.active) return;
+    // Playback changes update existing controls so tab-entry animations keep running.
+    const playing = m.status === 'Playing';
+    const label = playing ? 'Pause' : 'Play';
+    const app = this.main.querySelector('.np-app');
+    if (app) app.textContent = `${appName(m.app)} · ${t(playing ? 'Now playing' : m.status || '')}`;
+    const action = this.actionDefs[0];
+    if (action) {
+      action.label = label;
+      action.icon = playing ? 'pause' : 'play';
+      const button = this.main.querySelector('.hub-actions .hub-btn.primary');
+      if (button && button.title !== t(label)) {
+        button.title = t(label);
+        button.innerHTML = `${icon(action.icon)}<span>${escapeHtml(t(label))}</span>`;
+      }
+    }
     const pos = mediaPosition();
     setSlider(this.main.querySelector('.np-bar'), m.duration > 0 ? (pos / m.duration) * 100 : 0);
     const t0 = this.main.querySelector('.np-t0');
