@@ -150,7 +150,7 @@ export class HomeView {
     const sig =
       items.map((i) => `${i.key}|${i.game ? `${i.game.artVersion}|${i.game.name}|${isRunning(i.game)}` : ''}`).join(',') +
       state.settings.tileStyle +
-      (this.tab === 'media' && sys.media && sys.media.active ? `|${sys.media.app}|${sys.media.key}|${sys.media.status}|${sys.artKey}` : '');
+      (this.tab === 'media' && sys.media && sys.media.active ? `|${sys.media.app}|${sys.media.key}|${sys.artKey}` : '');
     if (!force && sig === this.sig) {
       // Data may still have changed (playtime etc.) — refresh hub quietly.
       const cur = this.items[this.sel];
