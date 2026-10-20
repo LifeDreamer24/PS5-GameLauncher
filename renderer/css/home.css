@@ -923,7 +923,8 @@
   animation: hubRise calc(0.6s * var(--spd)) var(--ease-out) 0.18s both;
 }
 
-.home-view .hub-main.enter .hub-actions {
+.home-view .hub-main.enter .hub-actions,
+.home-view .hub-main.enter .np-progress {
   animation: hubRise calc(0.6s * var(--spd)) var(--ease-out) 0.24s both;
 }
 
