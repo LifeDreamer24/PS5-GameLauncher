@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('api', {
   captureState: invoke('capture:state'),
   captureEncoders: invoke('capture:encoders'),
   captureList: invoke('capture:list'),
+  captureLast: invoke('capture:last'),
   captureAction: invoke('capture:action'),
   captureDelete: invoke('capture:delete'),
   captureFavorite: invoke('capture:favorite'),
@@ -60,12 +61,19 @@ contextBridge.exposeInMainWorld('api', {
 
   searchSteam: invoke('steam:search'),
 
+  steamFriends: invoke('steamfriends:get'),
+  steamFriendsSetKey: invoke('steamfriends:setKey'),
+  steamFriendsForget: invoke('steamfriends:forget'),
+  steamFriendsOpen: invoke('steamfriends:open'),
   discordState: invoke('discord:state'),
   discordSetup: invoke('discord:setup'),
   discordConnect: invoke('discord:connect'),
   discordDisconnect: invoke('discord:disconnect'),
   discordForget: invoke('discord:forget'),
   discordCmd: invoke('discord:cmd'),
+  discordGuilds: invoke('discord:guilds'),
+  discordVoiceChannels: invoke('discord:voiceChannels'),
+  discordDirectChats: invoke('discord:directChats'),
   discordOpenChat: invoke('discord:openChat'),
   discordCloseChat: invoke('discord:closeChat'),
   discordOpenInDiscord: invoke('discord:openInDiscord'),
@@ -114,7 +122,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'app:sleep', 'downloads:state'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'steamfriends:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'capture:saved', 'app:sleep', 'downloads:state'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

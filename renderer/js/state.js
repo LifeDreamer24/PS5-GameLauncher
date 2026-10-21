@@ -69,6 +69,12 @@ export async function loadState() {
     state.capture = s;
     emit('capture-state', s);
   });
+  // The newest clip / screenshot (the quick menu shows it as a card).
+  api.on('capture:saved', (c) => {
+    state.lastCapture = c;
+    emit('capture-saved', c);
+  });
+  api.captureLast().then((c) => c && !state.lastCapture && (state.lastCapture = c)).catch(() => {});
   api.on('game:exited', (e) => emit('game-exited', e));
   api.on('downloads:state', (d) => {
     state.downloads = d || { items: [] };

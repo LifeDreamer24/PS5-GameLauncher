@@ -128,3 +128,31 @@ export function inCall() {
   return !!(st && st.status === 'ready' && st.channel);
 }
 
+
+/* Voice chats to join (the Game Base's Discord tab) ----------------------- */
+
+/** The servers, each with who is in voice on it (kept by main for 20 s; fresh: ask again). */
+export function discordGuilds(fresh = false) {
+  return api.discordGuilds({ fresh });
+}
+
+/** A server's voice channels with who is in each. */
+export function discordVoiceChannels(guildId) {
+  return api.discordVoiceChannels(guildId);
+}
+
+/** Direct (and group) chats the launcher knows of, with who is in each one's call. */
+export function discordDirectChats() {
+  return api.discordDirectChats();
+}
+
+/** Join a voice channel or a direct chat's call (Discord does it). */
+export async function joinVoice(channelId) {
+  try {
+    await api.discordCmd('join', channelId);
+    return true;
+  } catch (err) {
+    pushNotification({ title: 'Discord', body: clean(err), icon: 'party' });
+    return false;
+  }
+}

@@ -16,6 +16,7 @@ import { openSearch } from './views/search.js';
 import { GalleryView } from './views/gallery.js';
 import { runBoot } from './views/boot.js';
 import { loadDiscord } from './discord.js';
+import { loadFriends } from './steamfriends.js';
 import { initDualsense } from './dualsense.js';
 import { setLanguage, t, language } from './i18n.js';
 
@@ -204,6 +205,7 @@ async function main() {
     sessionStorage.removeItem('reopen');
   } catch {}
   loadDiscord();
+  loadFriends();
   applySettings();
   applyWindow();
   background.init();

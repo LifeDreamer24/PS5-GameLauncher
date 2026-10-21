@@ -10,6 +10,7 @@ const { launchGame } = require('./launcher');
 const { searchSteam } = require('./metadata');
 const { SystemBridge } = require('./system');
 const { DiscordBridge } = require('./discord');
+const { SteamFriends } = require('./steamfriends');
 const { OverlayManager } = require('./overlay');
 const { GameMonitor } = require('./gamemonitor');
 const { SoundPacks } = require('./soundpacks');
@@ -157,7 +158,7 @@ function migrateDataDir() {
     }
     // The folder is in use (or the new one exists already): move/copy what matters.
     fs.mkdirSync(dir, { recursive: true });
-    for (const name of ['settings.json', 'library.json', 'discord.json', 'Local State', 'artwork', 'avatars']) {
+    for (const name of ['settings.json', 'library.json', 'discord.json', 'steamfriends.json', 'Local State', 'artwork', 'avatars']) {
       const from = path.join(old, name);
       const to = path.join(dir, name);
       if (!fs.existsSync(from) || fs.existsSync(to)) continue;
@@ -201,6 +202,7 @@ function start() {
   const library = new Library({ store: libStore, settings, artDir, send });
   const system = new SystemBridge();
   const discord = new DiscordBridge({ file: path.join(dataDir, 'discord.json'), send });
+  const steamFriends = new SteamFriends({ file: path.join(dataDir, 'steamfriends.json'), send, system });
   const obs = new ObsBridge({ dataDir, settings, send, system, defaultDir: () => path.join(app.getPath('videos'), 'PS5 Game Launcher') });
   overlay = new OverlayManager({
     system,
@@ -669,6 +671,7 @@ function start() {
     }
     applyPassthrough();
     discord.start();
+    setTimeout(() => steamFriends.start(), 4000);
     overlay.create();
     monitor.start();
     setTimeout(() => downloads.start().catch((err) => console.warn('[downloads]', err)), 2500);
@@ -702,6 +705,7 @@ function start() {
     downloads.stop();
     system.stop();
     discord.close();
+    steamFriends.stop();
     settings.saveNow();
     libStore.saveNow();
     app.quit();
@@ -1117,6 +1121,13 @@ function start() {
     return m ? `${m} min${n % 60 ? ` ${n % 60} s` : ''}` : `${n} s`;
   };
   const captureError = (title, err) => captureNote({ title, body: String((err && err.message) || err), icon: 'info' });
+  // The newest capture, for the quick menu's card (both windows: the overlay doesn't get notifications).
+  let lastCapture = null;
+  const captureSaved = (n) => {
+    lastCapture = { ...n, time: Date.now() };
+    send('capture:saved', lastCapture);
+  };
+  ipcMain.handle('capture:last', () => lastCapture);
   ipcMain.handle('capture:state', () => obs.publicState());
   ipcMain.handle('capture:encoders', () => obs.encoderInfo());
   ipcMain.handle('capture:list', () => obs.list());
@@ -1148,17 +1159,22 @@ function start() {
       if (kind === 'clip') {
         const c = await obs.saveClip();
         captureNote({ title: 'Recent gameplay saved', body: c.seconds ? `${game} · ${captureLength(c.seconds)}` : game, image: c.thumbUrl, icon: 'clipRecent' });
+        captureSaved({ kind: 'clip', title: 'Recent gameplay saved', game, image: c.thumbUrl || null, url: c.url || null });
         return c;
       }
       if (kind === 'screenshot') {
         const c = await obs.screenshot();
         captureNote({ title: 'Screenshot saved', body: game, image: c.url, icon: 'camera' });
+        captureSaved({ kind: 'screenshot', title: 'Screenshot saved', game, image: c.url || null, url: c.url || null });
         return c;
       }
       if (kind === 'record') {
         const r = await obs.toggleRecording();
         if (r.started) captureNote({ title: 'Recording started', body: game, icon: 'record' });
-        else captureNote({ title: 'Recording saved', body: r.capture && r.capture.seconds ? `${game} · ${captureLength(r.capture.seconds)}` : game, image: r.capture && r.capture.thumbUrl, icon: 'record' });
+        else {
+          captureNote({ title: 'Recording saved', body: r.capture && r.capture.seconds ? `${game} · ${captureLength(r.capture.seconds)}` : game, image: r.capture && r.capture.thumbUrl, icon: 'record' });
+          captureSaved({ kind: 'recording', title: 'Recording saved', game, image: (r.capture && r.capture.thumbUrl) || null, url: (r.capture && r.capture.url) || null });
+        }
         return r;
       }
     } catch (err) {
@@ -1227,12 +1243,19 @@ function start() {
   ipcMain.handle('bt:scan', (_e, action) => system.bluetoothScan(action));
 
   // Discord party (voice) controls
+  ipcMain.handle('steamfriends:get', (_e, opts) => steamFriends.get(opts || {}));
+  ipcMain.handle('steamfriends:setKey', (_e, data) => steamFriends.setKey(data || {}));
+  ipcMain.handle('steamfriends:forget', () => steamFriends.forget());
+  ipcMain.handle('steamfriends:open', (_e, kind, id) => steamFriends.open(kind, id));
   ipcMain.handle('discord:state', () => discord.publicState());
   ipcMain.handle('discord:setup', (_e, data) => discord.setup(data || {}));
   ipcMain.handle('discord:connect', () => discord.connect({ interactive: true }));
   ipcMain.handle('discord:disconnect', () => discord.disconnect());
   ipcMain.handle('discord:forget', () => discord.forget());
   ipcMain.handle('discord:cmd', (_e, name, value, extra) => discord.command(name, value, extra));
+  ipcMain.handle('discord:guilds', (_e, opts) => discord.guilds(opts || {}));
+  ipcMain.handle('discord:voiceChannels', (_e, guildId) => discord.voiceChannels(guildId));
+  ipcMain.handle('discord:directChats', () => discord.directChats());
   ipcMain.handle('discord:openChat', (_e, id) => discord.openChat(id));
   ipcMain.handle('discord:closeChat', () => discord.closeChat());
   ipcMain.handle('discord:openInDiscord', (_e, id, guild) => discord.openInDiscord(id, guild));
@@ -1269,7 +1292,7 @@ function start() {
   ipcMain.handle('cache:size', () => library.cacheSize());
   ipcMain.handle('app:dataDir', () => dataDir);
   ipcMain.handle('app:openExternal', (_e, url) => {
-    if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers|github\.com\/nefarius\/HidHide|github\.com\/Alia5\/VIIPER|obsproject\.com)\/?)/.test(String(url))) {
+    if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers|steamcommunity\.com\/dev\/apikey|github\.com\/nefarius\/HidHide|github\.com\/Alia5\/VIIPER|obsproject\.com)\/?)/.test(String(url))) {
       return shell.openExternal(url);
     }
     return null;

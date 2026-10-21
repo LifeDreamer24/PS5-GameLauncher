@@ -78,6 +78,22 @@ function wave(prev, cur) {
   w._done = setTimeout(() => w.remove(), 300);
 }
 
+/** The same sweep of light across an item, sideways (left / right): a row of items moved through. */
+export function waveAcross(cur, dir) {
+  if (!cur || document.body.classList.contains('reduce-motion')) return;
+  let w = cur.querySelector(':scope > .fx-wave');
+  if (!w) {
+    w = document.createElement('span');
+    w.className = 'fx-wave';
+    cur.append(w);
+  }
+  w.classList.remove('run', 'up', 'down', 'left', 'right');
+  void w.offsetWidth;
+  w.classList.add('run', dir > 0 ? 'right' : 'left');
+  clearTimeout(w._done);
+  w._done = setTimeout(() => w.remove(), 360);
+}
+
 export class FocusList {
   constructor(els = [], { index = 0, onChange = null, wrap = false } = {}) {
     this.els = els;

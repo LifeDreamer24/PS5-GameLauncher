@@ -449,6 +449,10 @@ class DiscordBridge {
       } catch {}
     }
     this.state.channel = { id: ch.id, name: ch.name || 'Voice channel', guild, dm: !ch.guild_id };
+    if (!ch.guild_id) {
+      const known = (this.creds.dms || []).find((d) => d.id === ch.id);
+      this.rememberDm(ch.id, (known && known.name) || ch.name || 'Direct call', known && known.icon);
+    }
     this.state.members = (ch.voice_states || []).map((vs) => this.describeMember(vs));
     this.push();
   }
@@ -578,6 +582,7 @@ class DiscordBridge {
     list.unshift({ channelId, name, icon, last: d.body || (msg && msg.content) || '', time: Date.now(), unread: (prev ? prev.unread : 0) + 1 });
     this.state.conversations = list.slice(0, 12);
     this.push();
+    this.rememberDm(channelId, name, icon);
     this.send('discord:message', { channelId, title: name, body: d.body || (msg && msg.content) || '', icon });
   }
 
@@ -644,8 +649,104 @@ class DiscordBridge {
         await this.request('SET_USER_VOICE_SETTINGS', { user_id: String(extra), mute: !!value });
         return true;
       }
+      case 'join': {
+        // A server's voice channel, or a direct (group) chat's call: the Discord client joins it.
+        const id = String(value || '');
+        if (!/^\d+$/.test(id)) throw new Error('Unknown voice chat');
+        await this.request('SELECT_VOICE_CHANNEL', { channel_id: id, force: true, navigate: false }, { timeout: 15000 });
+        this.voiceCache = null;
+        await this.loadChannel();
+        return true;
+      }
     }
     throw new Error(`Unknown command ${name}`);
+  }
+
+  /* -------------------------------------------------------------- */
+  /* Voice chats to join (the Game Base's Discord tab)              */
+  /* -------------------------------------------------------------- */
+
+  /** People in a voice channel, from its voice states. */
+  voiceMembers(states) {
+    return (states || []).map((vs) => {
+      const u = this.describeUser(vs.user) || { id: '?', name: 'Unknown', avatar: null };
+      return { ...u, name: vs.nick || u.name };
+    });
+  }
+
+  /** A server's voice (and stage) channels with who is in each. */
+  async voiceChannels(guildId) {
+    const id = String(guildId || '');
+    if (!/^\d+$/.test(id)) throw new Error('Unknown server');
+    const res = await this.request('GET_CHANNELS', { guild_id: id });
+    const list = ((res && res.channels) || []).filter((c) => c.type === 2 || c.type === 13);
+    const out = [];
+    for (const c of list) {
+      let ch = null;
+      try {
+        ch = await this.request('GET_CHANNEL', { channel_id: c.id }, { timeout: 5000 });
+      } catch {}
+      out.push({ id: c.id, name: c.name || (ch && ch.name) || 'Voice', stage: c.type === 13, position: ch && ch.position != null ? ch.position : out.length, members: this.voiceMembers(ch && ch.voice_states) });
+    }
+    return out.sort((a, b) => a.position - b.position);
+  }
+
+  /**
+   * The servers, with who is in voice on each (the avatars on their rows).
+   * Looked up a few servers at a time and kept for 20 seconds.
+   */
+  async guilds({ fresh = false } = {}) {
+    if (this.state.status !== 'ready') throw new Error('Not connected to Discord');
+    if (!fresh && this.voiceCache && Date.now() - this.voiceCache.at < 20000) return this.voiceCache.guilds;
+    const res = await this.request('GET_GUILDS');
+    const guilds = ((res && res.guilds) || []).map((g) => ({ id: g.id, name: g.name, icon: g.icon_url || null, voice: [] }));
+    let next = 0;
+    const worker = async () => {
+      while (next < guilds.length) {
+        const g = guilds[next++];
+        try {
+          g.voice = (await this.voiceChannels(g.id)).flatMap((c) => c.members);
+        } catch {}
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    this.voiceCache = { at: Date.now(), guilds };
+    return guilds;
+  }
+
+  /**
+   * Direct (and group) chats to call: Discord has no list of them for the
+   * launcher, so these are the ones it has seen (messages, calls), kept
+   * between runs. Each says who is in its call right now.
+   */
+  async directChats() {
+    if (this.state.status !== 'ready') throw new Error('Not connected to Discord');
+    const seen = new Map();
+    for (const d of this.creds.dms || []) seen.set(d.id, d);
+    for (const c of this.state.conversations) if (!seen.has(c.channelId)) seen.set(c.channelId, { id: c.channelId, name: c.name, icon: c.icon, maybe: true });
+    if (this.state.channel && this.state.channel.dm && !seen.has(this.state.channel.id)) seen.set(this.state.channel.id, { id: this.state.channel.id, name: this.state.channel.name, icon: null });
+    const out = [];
+    for (const d of [...seen.values()].slice(0, 16)) {
+      let ch = null;
+      try {
+        ch = await this.request('GET_CHANNEL', { channel_id: d.id }, { timeout: 5000 });
+      } catch {
+        continue;
+      }
+      if (!ch || (ch.type !== 1 && ch.type !== 3)) continue; // a server channel (a mention), not a direct chat
+      if (d.maybe) this.rememberDm(d.id, d.name, d.icon);
+      out.push({ id: d.id, name: d.name || ch.name || 'Direct chat', icon: d.icon || null, group: ch.type === 3, members: this.voiceMembers(ch.voice_states) });
+    }
+    return out;
+  }
+
+  /** Keep a direct chat for "Direct Voice Chats" (the newest 20). */
+  rememberDm(id, name, icon) {
+    const list = (this.creds.dms || []).filter((d) => d.id !== id);
+    list.unshift({ id, name, icon: icon || null });
+    this.creds.dms = list.slice(0, 20);
+    clearTimeout(this.dmSaveTimer);
+    this.dmSaveTimer = setTimeout(() => this.saveCreds(), 1000);
   }
 
   /** Called once at startup: reconnect silently if we were authorized before. */

@@ -9,6 +9,7 @@ import { configureSound, unlockAudio, setSoundPacks, resetAudio } from './sound.
 import { topOverlay } from './ui/overlay.js';
 import { QuickMenu } from './views/quickmenu.js';
 import { loadDiscord } from './discord.js';
+import { loadFriends } from './steamfriends.js';
 import { setLanguage, language } from './i18n.js';
 import { toast } from './ui/toast.js';
 import { openCaptureBar } from './ui/capturebar.js';
@@ -51,6 +52,7 @@ async function main() {
   // The launcher changed the language: rebuild this window too.
   on('settings', () => (state.settings.language || 'auto') !== lang && location.reload());
   loadDiscord();
+  loadFriends();
   applySettings();
   // Controller input comes from the native helper (the browser only sees
   // gamepads while this window is focused, which a game may not allow).

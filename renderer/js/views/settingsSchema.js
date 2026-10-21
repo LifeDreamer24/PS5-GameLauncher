@@ -40,6 +40,7 @@ import {
   setOutput,
 } from '../system.js';
 import { party, loadDiscord, discordSetup, discordConnect, discordDisconnect, discordForget, statusText } from '../discord.js';
+import { steam, loadFriends, setFriendsKey, forgetFriendsKey } from '../steamfriends.js';
 import { t } from '../i18n.js';
 
 const onOff = (key, label, desc) => ({ type: 'toggle', key, label, desc });
@@ -115,6 +116,53 @@ function discordItems() {
       'One-time setup: in the Discord Developer Portal create a New Application (any name). Under OAuth2, copy the Client ID and reset/copy the Client Secret, and add the redirect http://localhost. Enter both here and choose Connect — Discord asks you to authorize the launcher. Only you can use this application, which is what lets it control your voice.',
   });
   return items;
+}
+
+function steamFriendsItems() {
+  const st = steam.state;
+  const status = !st || !st.configured
+    ? 'Not set up'
+    : st.status === 'ready'
+      ? st.self
+        ? t('{name} · {n} friends', { name: st.self.name, n: st.friends.length })
+        : t('{n} friends', { n: st.friends.length })
+      : st.status === 'loading' || st.status === 'idle'
+        ? 'Loading…'
+        : st.error || 'Not connected';
+  const items = [
+    { type: 'info', label: 'Status', value: status, valueClass: st && st.status === 'ready' && !st.error ? 'ok' : '' },
+    st && st.source === 'local' ? { type: 'info', label: 'Friends List', value: 'Private: read from Steam on this PC' } : null,
+    {
+      type: 'text',
+      label: 'Steam Web API Key',
+      secret: true,
+      placeholder: '32 letters and numbers',
+      get: () => (steam.state && steam.state.configured ? 'saved-key' : ''),
+      set: (v) => (v ? setFriendsKey({ key: v }) : null),
+    },
+    { type: 'action', icon: 'edit', label: 'Paste Key from Clipboard', run: () => setFriendsKey({ fromClipboard: true }) },
+    { type: 'action', icon: 'external', label: 'Open the Steam API Key Page', run: () => api.openExternal('https://steamcommunity.com/dev/apikey') },
+  ];
+  if (st && st.configured) {
+    items.push(
+      { type: 'action', icon: 'refresh', label: 'Refresh Friends', run: () => loadFriends({ refresh: true }) },
+      {
+        type: 'action',
+        icon: 'trash',
+        label: 'Remove Steam Friends',
+        danger: true,
+        run: async () => {
+          if (await confirmDialog({ title: 'Remove Steam Friends?', message: 'The Steam Web API key is deleted from this PC.', confirmLabel: 'Remove', danger: true })) await forgetFriendsKey();
+        },
+      }
+    );
+  }
+  items.push({
+    type: 'note',
+    label:
+      'One-time setup for the Friends list in the Game Base: open the Steam API Key page, sign in with your Steam account, register a key (any domain name, for example localhost) and copy it here, or paste it from the clipboard. The launcher only reads which friends are online and what they play with it; it is stored encrypted on this PC. Messages, joining and profiles open in Steam.',
+  });
+  return items.filter(Boolean);
 }
 
 function outputItems() {
@@ -1006,6 +1054,7 @@ export function buildSchema(router) {
           ],
         },
         { label: 'Discord', items: discordItems, onEnter: () => loadDiscord() },
+        { label: 'Steam Friends', items: steamFriendsItems, onEnter: () => loadFriends() },
         {
           label: 'Linked Platforms',
           items: () => [

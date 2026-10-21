@@ -5,9 +5,10 @@ import { icon } from '../icons.js';
 import { state, on, api, artUrl, sortGames, gamesIn, setSetting, lastActive, emit, currentGame, activeDownloads, findGame, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
 import { mouseActive, connectedPads, rumble } from '../input.js';
-import { mountOverlay, FocusList, topOverlay } from '../ui/overlay.js';
-import { confirmDialog, sliderDialog, optionsMenu } from '../ui/dialogs.js';
-import { party, discordCmd, discordConnect, statusText, inCall, conversations } from '../discord.js';
+import { mountOverlay, FocusList, topOverlay, waveAcross } from '../ui/overlay.js';
+import { confirmDialog, sliderDialog, optionsMenu, textDialog } from '../ui/dialogs.js';
+import { party, discordCmd, discordConnect, statusText, inCall, conversations, discordGuilds, discordVoiceChannels, discordDirectChats, joinVoice } from '../discord.js';
+import { steam, loadFriends, openFriend, friendsList, onlineCount, presenceText } from '../steamfriends.js';
 import { openChat } from '../ui/chat.js';
 import { launchGame, PAD_EMULATION as EMULATION, emulationName, controllerModeLabel, padEmulationLabel, pickControllerMode, pickPadEmulation } from '../ui/gameactions.js';
 import { tileArt } from '../ui/tiles.js';
@@ -85,6 +86,22 @@ function gameIconUrl(g) {
   return artUrl(g, 'grid') || artUrl(g, 'capsule') || artUrl(g, 'banner') || artUrl(g, 'icon');
 }
 
+/** "Let's Play Games" -> "LPG": a server without an icon. */
+function initials(name) {
+  return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 3).map((w) => w[0]).join('').toUpperCase();
+}
+
+// The Game Base's tabs as the PS5 draws them: solid shapes (white when open, grey otherwise),
+// their faces and gaps cut out in the rail's colour (--gb-cut).
+const CUT = 'var(--gb-cut)';
+const RAIL_ICONS = {
+  friends: `<rect x="9" y="2.5" width="12.5" height="12.5" rx="3.6" fill="currentColor"/><circle cx="13.5" cy="7.3" r="1.05" fill="${CUT}"/><circle cx="17.1" cy="7.3" r="1.05" fill="${CUT}"/><path d="M12.7 10.3c1.2 1.3 4.1 1.3 5.3 0" fill="none" stroke="${CUT}" stroke-width="1.4" stroke-linecap="round"/><rect x="2.5" y="9" width="12.5" height="12.5" rx="3.6" fill="currentColor" stroke="${CUT}" stroke-width="1.7"/><circle cx="7" cy="13.9" r="1.05" fill="${CUT}"/><circle cx="10.6" cy="13.9" r="1.05" fill="${CUT}"/><path d="M6.2 16.9c1.2 1.3 4.1 1.3 5.3 0" fill="none" stroke="${CUT}" stroke-width="1.4" stroke-linecap="round"/>`,
+  headset: `<path d="M4.1 14.2V12a7.9 7.9 0 0 1 15.8 0v2.2" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><rect x="2.6" y="12.4" width="5.1" height="7.6" rx="2.2" fill="currentColor"/><rect x="16.3" y="12.4" width="5.1" height="7.6" rx="2.2" fill="currentColor"/><path d="M18.9 19.8c0 1.5-2 2.3-5.3 2.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`,
+  messages: `<path d="M2.5 6A3.5 3.5 0 0 1 6 2.5h7A3.5 3.5 0 0 1 16.5 6v4A3.5 3.5 0 0 1 13 13.5H8.6L5 16.6v-3.3A3.5 3.5 0 0 1 2.5 10z" fill="currentColor"/><path d="M10.5 11A3.5 3.5 0 0 1 14 7.5h4.5A3.5 3.5 0 0 1 22 11v3.6a3.5 3.5 0 0 1-2.5 3.4v3.3L16 18.1h-2a3.5 3.5 0 0 1-3.5-3.5z" fill="currentColor" stroke="${CUT}" stroke-width="1.7"/>`,
+  discord: `<path d="M19.3 5.4a16.3 16.3 0 0 0-4-1.3l-.5 1a15 15 0 0 0-5.6 0l-.5-1a16.3 16.3 0 0 0-4 1.3C2.2 9.2 1.5 12.9 1.9 16.6a16.4 16.4 0 0 0 5 2.5l1.1-1.7a10.6 10.6 0 0 1-1.7-.8l.4-.3a11.7 11.7 0 0 0 10.6 0l.4.3a10.6 10.6 0 0 1-1.7.8l1.1 1.7a16.4 16.4 0 0 0 5-2.5c.5-4.3-.7-8-2.8-11.2z" fill="currentColor"/><ellipse cx="8.6" cy="12.6" rx="1.65" ry="1.85" fill="${CUT}"/><ellipse cx="15.4" cy="12.6" rx="1.65" ry="1.85" fill="${CUT}"/>`,
+};
+const railIcon = (id) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${RAIL_ICONS[id] || ''}</svg>`;
+
 function avatarFor(m) {
   if (m.avatar) return `<img src="${escapeHtml(m.avatar)}" alt="" loading="lazy">`;
   let hash = 0;
@@ -112,6 +129,7 @@ export class QuickMenu {
       if (this.panelIs('accessories')) this.rebuildPanel();
     });
     on('downloads', () => this.ctl && this.onDownloads());
+    on('capture-saved', () => this.ctl && !this.panel && this.cardSignature() !== this.cardSig && this.renderCards(false));
     on('media', () => this.ctl && this.onMedia());
     on('volume', () => this.ctl && this.refreshRows('sound'));
     on('outputs', () => this.ctl && this.refreshRows('sound'));
@@ -121,9 +139,16 @@ export class QuickMenu {
     on('bluetooth', () => this.ctl && this.panelIs('bluetooth') && this.rebuildPanel());
     on('discord', () => {
       if (!this.ctl) return;
-      if (this.panelIs('party')) this.refreshParty();
-      else if (this.panelIs('messages')) this.rebuildPanel();
+      if (this.baseTab('party')) this.refreshParty();
+      else if (this.baseTab('messages')) this.rebuildPanel();
       else if (!this.panel && this.cardSignature() !== this.cardSig) this.renderCards(false);
+      if (this.panelIs('party')) this.renderRail();
+      this.updatePartyIcon();
+    });
+    on('steamfriends', () => {
+      if (!this.ctl) return;
+      if (this.baseTab('friends')) this.refreshFriends();
+      if (this.panelIs('party')) this.renderRail();
       this.updatePartyIcon();
     });
   }
@@ -159,8 +184,8 @@ export class QuickMenu {
       g ? { id: 'game', game: g, label: g.name, panel: () => this.gamePanel(g) } : null,
       { id: 'library', icon: 'library', label: 'Game Library', run: () => (close(), this.router.open('library')) },
       { id: 'notifications', icon: 'bell', label: 'Notifications', panel: () => this.notificationsPanel() },
-      { id: 'party', icon: 'party', label: 'Party', panel: () => this.partyPanel() },
-      { id: 'messages', icon: 'chat', label: 'Messages', panel: () => this.messagesPanel() },
+      // Friends, Party and Messages in one card, as the PS5's Game Base (id kept from "Party").
+      { id: 'party', icon: 'party', label: 'Game Base', panel: () => this.gameBasePanel() },
       { id: 'search', icon: 'search', label: 'Search', run: () => (close(), this.router.openSearch()) },
       { id: 'music', icon: 'music', label: 'Music', panel: () => this.musicPanel(), wide: true },
       { id: 'sound', icon: 'volume', label: 'Sound', panel: () => this.soundPanel() },
@@ -201,6 +226,7 @@ export class QuickMenu {
         it.id === 'notifications' ? h('span', { class: 'qm-badge' }) : null,
         it.id === 'music' ? h('span', { class: 'qm-eq', html: '<i></i><i></i><i></i>' }) : null,
         it.id === 'party' ? h('span', { class: 'qm-live' }) : null,
+        it.id === 'party' ? h('span', { class: 'qm-online' }) : null,
         it.id === 'accessories' ? h('span', { class: 'qm-batt', html: '<i></i>' }) : null,
         this.customizing && !FIXED.has(it.id) ? h('span', { class: `qm-check${hidden.has(it.id) ? '' : ' on'}`, html: icon('check') }) : null
       );
@@ -237,10 +263,8 @@ export class QuickMenu {
     this.items = this.allItems();
     this.zone = 'bar';
     this.el.classList.add('customizing');
-    renderHints(this.hints, [
-      ['confirm', 'Select'],
-      ['back', 'Done'],
-    ]);
+    // As on the PS5: no button prompts while customizing.
+    renderHints(this.hints, []);
     this.renderBar(id);
   }
 
@@ -255,6 +279,9 @@ export class QuickMenu {
     else this.customHidden.add(it.id);
     sfx.toggle();
     const el = this.barNav.els[i];
+    el.classList.remove('press');
+    void el.offsetWidth;
+    el.classList.add('press');
     const off = this.customHidden.has(it.id);
     el.classList.toggle('off', off);
     el.querySelector('.qm-check')?.classList.toggle('on', !off);
@@ -305,6 +332,23 @@ export class QuickMenu {
         run: () => this.openPanel(this.barIndex('game')),
       });
     }
+    // A clip / screenshot just saved: its card opens the Media Gallery (as on the PS5).
+    const shot = state.lastCapture;
+    if (shot && Date.now() - shot.time < 30 * 60000) {
+      const img = shot.image ? (window.appUrl ? window.appUrl(shot.image) : shot.image) : null;
+      cards.push({
+        capture: true,
+        img,
+        icon: shot.kind === 'screenshot' ? 'camera' : 'clipRecent',
+        cap: shot.kind === 'screenshot' ? 'Screenshot' : shot.kind === 'recording' ? 'Recording' : 'Recent Gameplay',
+        title: shot.title,
+        sub: shot.game || ' ',
+        run: () => {
+          this.close();
+          this.router.open('gallery');
+        },
+      });
+    }
     // Steam updates under way: like the PS5's Downloads/Uploads card.
     const dls = activeDownloads();
     if (dls.length) {
@@ -338,7 +382,10 @@ export class QuickMenu {
         cap: `${t('Party')} · ${t(st.members.length === 1 ? '1 member' : '{n} members', { n: st.members.length })}`,
         title: st.channel.name,
         sub: st.channel.guild || (st.channel.dm ? 'Direct call' : ''),
-        run: () => this.openPanel(this.barIndex('party')),
+        run: () => {
+          this.gbTab = 'party';
+          this.openPanel(this.barIndex('party'));
+        },
       });
     }
     const last = sortGames(games.filter((g) => lastActive(g) && g !== playing), 'recent')[0];
@@ -413,7 +460,7 @@ export class QuickMenu {
       return h(
         'button',
         {
-          class: `qm-card fx${c.media ? ' media' : ''}${c.playing ? ' playing' : ''}${c.download ? ' download' : ''}${animate ? ' anim' : ''}`,
+          class: `qm-card fx${c.media ? ' media' : ''}${c.playing ? ' playing' : ''}${c.download ? ' download' : ''}${c.capture ? ' capture' : ''}${animate ? ' anim' : ''}`,
           style: { animationDelay: `${0.06 + i * 0.05}s` },
           onmouseenter: () => mouseActive() && this.focus('cards', i, true),
           onclick: () => c.run(),
@@ -432,6 +479,7 @@ export class QuickMenu {
     this.cardRow.append(...cardEls);
     this.cardNav = new FocusList(cardEls, { index: Math.min(keep, cardEls.length - 1) });
     if (!wasFocused) this.cardNav.blur();
+    this.layoutCards();
     this.cardSig = this.cardSignature();
     this.tickProgress();
     this.paintDownloadCard();
@@ -465,7 +513,7 @@ export class QuickMenu {
     const m = sys.media;
     const st = party.state;
     const p = inCall() ? `${st.channel.id}|${st.members.map((x) => `${x.id}${x.speaking ? '*' : ''}`).join(',')}` : 'no-party';
-    return (m && m.active ? `${m.app}|${m.key}|${m.status}|${sys.artKey}` : 'none') + '|' + p + '|' + activeDownloads().map((d) => d.appid).join(',');
+    return (m && m.active ? `${m.app}|${m.key}|${m.status}|${sys.artKey}` : 'none') + '|' + p + '|' + activeDownloads().map((d) => d.appid).join(',') + '|' + (state.lastCapture ? state.lastCapture.time : '');
   }
 
   open() {
@@ -510,12 +558,18 @@ export class QuickMenu {
     });
     this.renderCards(true);
     this.ticker = setInterval(() => this.tickProgress(), 500);
+    // The Friends tab stays current while it is on screen (main asks Steam at most every 30 s).
+    this.friendsTicker = setInterval(() => {
+      if (this.baseTab('friends')) loadFriends();
+      if (this.baseTab('discord')) this.loadDiscordView(true);
+    }, 30000);
     this.ctl = mountOverlay(this.el, (a) => this.handle(a), {
       dimApp: true,
       closeDelay: 380,
       onClose: () => {
         this.ctl = null;
         clearInterval(this.ticker);
+        clearInterval(this.friendsTicker);
         if (this.unwatch) this.unwatch();
         this.unwatch = null;
       },
@@ -537,7 +591,12 @@ export class QuickMenu {
 
   updatePartyIcon() {
     const b = this.el && this.el.querySelector('.qm-party');
-    if (b) b.classList.toggle('live', inCall());
+    if (!b) return;
+    b.classList.toggle('live', inCall());
+    // How many Steam friends are online, next to the icon (as the PS5 shows it).
+    const n = onlineCount();
+    const el = b.querySelector('.qm-online');
+    if (el) el.innerHTML = n ? `<i></i>${n}` : '';
   }
 
   updateEq() {
@@ -565,7 +624,21 @@ export class QuickMenu {
     }
   }
 
+  /**
+   * The cards as the PS5's carousel: the selected one grows (upwards, from the
+   * row's bottom line) and the row slides so it stands in the slot at the
+   * left, the one before it peeking in at the edge (css: .qm-cards, --qi).
+   * A card the mouse points at grows in place, so the row doesn't slide away
+   * from under the pointer.
+   */
+  layoutCards() {
+    if (!this.cardRow || !this.cardNav) return;
+    this.cardRow.classList.toggle('active', this.zone === 'cards');
+    if (!this.cardMouse) this.cardRow.style.setProperty('--qi', String(Math.max(0, this.cardNav.index)));
+  }
+
   focus(zone, i, fromMouse = false) {
+    this.cardMouse = fromMouse && zone === 'cards';
     if (zone !== this.zone && !fromMouse) sfx.move();
     this.zone = zone;
     if (zone === 'cards') this.cardNav.set(i);
@@ -574,17 +647,38 @@ export class QuickMenu {
   }
 
   applyFocus() {
+    this.layoutCards();
     this.cardNav && this.cardNav.blur();
     this.barNav.blur();
     if (this.panel) this.panel.nav.blur();
+    if (this.panel && this.panel.rail) this.panel.rail.forEach((el, i) => el.classList.toggle('focused', this.zone === 'rail' && i === this.panel.railIndex));
     if (this.zone === 'cards' && this.cardNav) this.cardNav.refocus();
     else if (this.zone === 'bar') this.barNav.refocus();
     else if (this.zone === 'panel' && this.panel) {
       this.panel.nav.refocus();
-      if (this.panel.nav.current) this.panel.nav.current.scrollIntoView({ block: 'nearest' });
+      this.scrollToRow(this.panel.nav.current);
     }
     this.barNav.els.forEach((el, i) => el.classList.toggle('active', !!this.panel && i === this.panel.index));
     if (this.panel) this.panel.nav.els.forEach((el) => this.renderRow(el));
+  }
+
+  /**
+   * Keep the focused row in view: on the first row the list goes back to its
+   * very top (its title and anything above the row show again); a row right
+   * under a section title ("Online: 4") brings the title along.
+   */
+  scrollToRow(cur) {
+    if (!cur || !this.panel) return;
+    const els = this.panel.nav.els;
+    const first = els.find((el) => !el.classList.contains('disabled'));
+    const box = this.panel.el.querySelector('.gb-main') || this.panel.el;
+    if (cur === first) {
+      box.scrollTop = 0;
+      return;
+    }
+    const prev = cur.previousElementSibling;
+    if (prev && prev._row && prev._row.type === 'section') prev.scrollIntoView({ block: 'nearest' });
+    cur.scrollIntoView({ block: 'nearest' });
   }
 
   activateBar(i) {
@@ -613,7 +707,7 @@ export class QuickMenu {
     const def = it.panel();
     const rows = def.rows.map((r, ri) => {
       const el = h('button', {
-        class: `qp-row fx fx-in t-${r.type || 'action'}${r.danger ? ' danger' : ''}`,
+        class: `qp-row fx fx-in t-${r.type || 'action'}${r.danger ? ' danger' : ''}${r.cls ? ` ${r.cls}` : ''}`,
         onmouseenter: () => {
           if (mouseActive() && this.panel && r.type !== 'section') {
             this.zone = 'panel';
@@ -646,14 +740,31 @@ export class QuickMenu {
       return el;
     });
     const player = def.player ? this.buildPlayer() : null;
-    const content = [
+    const headIcon = def.tabs ? '' : it.game ? `<span class="qp-game-ic"><img src="${escapeHtml(gameIconUrl(it.game) || '')}" alt=""></span>` : icon(it.icon);
+    let content = [
       h('div', {
-        class: 'qp-head',
-        html: `${it.game ? `<span class="qp-game-ic"><img src="${escapeHtml(gameIconUrl(it.game) || '')}" alt=""></span>` : icon(it.icon)}<span>${escapeHtml(t(def.title || it.label))}</span>${def.subtitle ? `<em>${escapeHtml(t(def.subtitle))}</em>` : ''}`,
+        class: `qp-head${def.headClass ? ` ${def.headClass}` : ''}`,
+        html: def.headHtml || `${headIcon}<span>${escapeHtml(t(def.title || it.label))}</span>${def.subtitle ? `<em>${escapeHtml(t(def.subtitle))}</em>` : ''}`,
       }),
       player,
       rows.length ? h('div', { class: 'qp-rows' }, ...rows) : h('div', { class: 'qp-empty', text: t(def.empty || 'Nothing here') }),
     ].filter(Boolean);
+    // The Game Base: its tabs on a rail at the left, the open one's content beside it.
+    let rail = null;
+    if (def.tabs) {
+      rail = def.tabs.map((tb) =>
+        h('button', {
+          class: `gb-tab fx gb-${tb.id}${tb.id === def.tab ? ' on' : ''}`,
+          title: t(tb.label),
+          html: (RAIL_ICONS[tb.icon] ? railIcon(tb.icon) : icon(tb.icon)) + '<i class="gb-dot"></i>',
+          onclick: () => {
+            this.zone = 'rail';
+            this.switchTab(tb.id);
+          },
+        })
+      );
+      content = [h('div', { class: 'gb-rail' }, ...rail), h('div', { class: 'gb-main' }, ...content)];
+    }
     if (player) {
       dragSlider(player.querySelector('.mp-progress'), (p) => {
         const m = sys.media;
@@ -692,7 +803,7 @@ export class QuickMenu {
       }
     } else {
       if (this.panel) this.dismissPanelEl(this.panel.el);
-      panelEl = h('div', { class: `qm-panel${it.wide ? ' wide' : ''}` }, ...content);
+      panelEl = h('div', { class: `qm-panel${it.wide ? ' wide' : ''}${def.tabs ? ' gamebase' : ''}` }, ...content);
       this.panelHost.append(panelEl);
       const r = this.barNav.els[i].getBoundingClientRect();
       const pw = panelEl.offsetWidth;
@@ -700,13 +811,17 @@ export class QuickMenu {
     }
     const first = Math.max(0, def.rows.findIndex((r) => r.type !== 'section'));
     const nav = new FocusList(rows, { index: rebuild ? Math.max(first, Math.min(keepIndex, rows.length - 1)) : first });
-    this.panel = { index: i, el: panelEl, nav, rows: def.rows, player, dlIds: def.dlIds };
+    const tabs = def.tabs || null;
+    this.panel = { index: i, el: panelEl, nav, rows: def.rows, player, dlIds: def.dlIds, rail, tabs, railIndex: tabs ? tabs.findIndex((x) => x.id === def.tab) : -1, sig: def.sig };
+    if (rail) this.renderRail();
     if (!rebuild) {
-      this.zone = rows.length ? 'panel' : 'bar';
+      this.zone = rows.length ? 'panel' : rail ? 'rail' : 'bar';
       if (def.onOpen) def.onOpen();
-    } else if (this.zone === 'panel' && !rows.length) {
-      this.zone = 'bar';
+    } else {
+      if (def.onOpen && def.tab !== undefined && def.tab !== this.lastTabOpened) def.onOpen();
+      if (this.zone === 'panel' && !rows.length) this.zone = rail ? 'rail' : 'bar';
     }
+    this.lastTabOpened = def.tab;
     this.setPanelOpen(true);
     if (player) this.updatePlayer();
     this.applyFocus();
@@ -752,6 +867,8 @@ export class QuickMenu {
 
   closePanel() {
     if (!this.panel) return;
+    this.lastTabOpened = undefined;
+    this.dcView = null;
     this.dismissPanelEl(this.panel.el);
     this.panel = null;
     this.zone = 'bar';
@@ -770,6 +887,38 @@ export class QuickMenu {
         el.innerHTML = html;
       }
     };
+    if (r.type === 'buttons' && r.search) {
+      const [pill, sq] = r.buttons();
+      put(`<span class="gb-search"><span class="gb-pill fx${focused && r.bi === 0 ? ' sel' : ''}" data-bi="0"><span>${escapeHtml(t(pill.label))}</span></span><span class="gb-sq fx${focused && r.bi === 1 ? ' sel' : ''}" data-bi="1" title="${escapeHtml(t(sq.label))}">${icon(sq.icon)}</span></span>`);
+      return;
+    }
+    // Discord tab: Direct Voice Chats, a server, a voice channel / direct chat (who is in it on the right).
+    if (r.type === 'dc') {
+      const d = r.item();
+      const lead = r.lead === 'phone'
+        ? `<span class="dc-phone">${icon('phoneCall')}</span>`
+        : r.lead === 'voice'
+          ? `<span class="dc-vic">${icon(d.stage ? 'mic' : 'volume')}</span>`
+          : `<span class="dc-gicon">${d.icon ? `<img src="${escapeHtml(d.icon)}" alt="" loading="lazy">` : `<b>${escapeHtml(initials(d.name))}</b>`}</span>`;
+      const people = d.members || d.voice || [];
+      const stack = people.length
+        ? `<span class="dc-stack">${people.slice(0, 2).map((m) => `<span class="dc-av">${avatarFor(m)}</span>`).join('')}<span class="dc-count">${people.length}</span></span>`
+        : '';
+      const here = r.current && r.current();
+      put(`${lead}<span class="qp-text"><span class="dc-name">${escapeHtml(t(d.name))}</span>${here ? `<span class="dc-here">${escapeHtml(t('You’re in this voice chat'))}</span>` : ''}</span>${stack}<i class="gb-sep"></i>`);
+      return;
+    }
+    if (r.type === 'friend') {
+      const f = r.friend();
+      if (!f) return;
+      el.classList.toggle('off', f.state === 'offline');
+      const av = f.avatar ? `<img src="${escapeHtml(f.avatar)}" alt="" loading="lazy">` : avatarFor({ id: f.id, name: f.name });
+      const dot = f.state === 'offline' ? '' : `<i class="gb-status ${f.state}"></i>`;
+      put(
+        `<span class="gb-av">${av}${dot}</span><span class="qp-text"><span class="gb-name">${escapeHtml(f.name)}</span><span class="gb-pres">${f.game ? icon('gamepad') : ''}<span>${escapeHtml(presenceText(f))}</span></span></span><i class="gb-sep"></i>`
+      );
+      return;
+    }
     if (r.type === 'buttons') {
       put(`<span class="qp-btns${r.labels ? ' labelled' : ''}">${r
         .buttons()
@@ -983,6 +1132,148 @@ export class QuickMenu {
     return { title: 'Sound', rows, onOpen: () => loadOutputs() };
   }
 
+  /* ------------------------------ Game Base ----------------------------- */
+
+  /** Is the Game Base open on this tab? */
+  baseTab(id) {
+    return this.panelIs('party') && (this.gbTab || 'friends') === id;
+  }
+
+  /** The Game Base, on its open tab (Friends, Party or Messages), as on the PS5. */
+  gameBasePanel() {
+    const tab = this.gbTab || 'friends';
+    const def = tab === 'party' ? this.partyPanel() : tab === 'messages' ? this.messagesPanel() : tab === 'discord' ? this.discordPanel() : this.friendsPanel();
+    return {
+      ...def,
+      tab,
+      tabs: [
+        { id: 'friends', icon: 'friends', label: 'Friends' },
+        { id: 'party', icon: 'headset', label: 'Party' },
+        { id: 'messages', icon: 'messages', label: 'Messages' },
+        { id: 'discord', icon: 'discord', label: 'Discord' },
+      ],
+    };
+  }
+
+  /** The rail's state: the open tab lit, friends online / a call going as a dot. */
+  renderRail() {
+    const p = this.panel;
+    if (!p || !p.rail) return;
+    const tab = this.gbTab || 'friends';
+    p.rail.forEach((el, i) => {
+      const id = p.tabs[i].id;
+      el.classList.toggle('on', id === tab);
+      el.classList.toggle('dot', id === 'friends' ? onlineCount() > 0 : id === 'party' ? inCall() : id === 'messages' ? conversations().some((c) => c.unread) : false);
+    });
+  }
+
+  /** Show another tab of the Game Base (from its rail). */
+  switchTab(id) {
+    if (!this.panelIs('party')) return;
+    if ((this.gbTab || 'friends') === id) {
+      this.applyFocus();
+      return;
+    }
+    this.gbTab = id;
+    sfx.move();
+    const zone = this.zone;
+    this.openPanel(this.panel.index, { keepIndex: 0 });
+    // The rows start from the top again; focus stays where it was (the rail).
+    this.panel.nav.set(Math.max(0, this.panel.rows.findIndex((r) => r.type !== 'section')));
+    this.zone = zone === 'rail' ? 'rail' : this.zone;
+    this.panel.railIndex = this.panel.tabs.findIndex((x) => x.id === id);
+    this.applyFocus();
+  }
+
+  friendsSig() {
+    const st = steam.state;
+    if (!st) return 'none';
+    return `${st.configured}|${st.status}|${st.updated ? 1 : 0}|${this.friendFilter || ''}|${friendsList().map((f) => `${f.id}:${f.state === 'offline' ? 0 : 1}`).join(',')}`;
+  }
+
+  /** Friends changed: rebuild when who is where changed, else repaint the rows. */
+  refreshFriends() {
+    if (this.friendsSig() !== this.panel.sig) this.rebuildPanel();
+    else this.panel.nav.els.forEach((el) => this.renderRow(el));
+  }
+
+  friendsPanel() {
+    const st = steam.state;
+    const setup = () => {
+      this.close();
+      this.router.open('settings', { category: 'users', section: 'Steam Friends' });
+    };
+    const sig = this.friendsSig();
+    if (!st || !st.configured) {
+      return {
+        title: 'Friends',
+        sig,
+        rows: [{ icon: 'steam', label: 'Set Up Steam Friends', sub: 'See which friends are online and what they play', chevron: true, run: setup }],
+      };
+    }
+    if (!st.updated) {
+      const failed = st.status === 'error';
+      return {
+        title: 'Friends',
+        sig,
+        onOpen: () => loadFriends(),
+        rows: failed
+          ? [
+              { icon: 'refresh', label: 'Couldn’t load your friends', sub: st.error || 'Select to try again', run: () => loadFriends({ refresh: true }) },
+              { icon: 'settings', label: 'Steam Friends Settings', chevron: true, run: setup },
+            ]
+          : [{ icon: 'steam', label: 'Loading your friends…', sub: 'One moment…' }],
+      };
+    }
+    const q = (this.friendFilter || '').toLowerCase();
+    const list = friendsList().filter((f) => !q || f.name.toLowerCase().includes(q));
+    const online = list.filter((f) => f.state !== 'offline');
+    const offline = list.filter((f) => f.state === 'offline');
+    const row = (f) => ({
+      type: 'friend',
+      friend: () => friendsList().find((x) => x.id === f.id) || f,
+      run: (el) => this.friendMenu(friendsList().find((x) => x.id === f.id) || f, el),
+    });
+    return {
+      title: 'Friends',
+      sig,
+      onOpen: () => loadFriends(),
+      rows: [
+        {
+          type: 'buttons',
+          search: true,
+          cls: 'gb-search-row',
+          buttons: () => [
+            { label: this.friendFilter ? t('“{q}”', { q: this.friendFilter }) : 'Search Friends', run: () => this.searchFriends() },
+            { icon: 'friendsCard', label: 'Open Steam Friends', run: () => openFriend('friends') },
+          ],
+        },
+        { type: 'section', label: t('Online: {n}', { n: online.length }) },
+        ...online.map(row),
+        offline.length ? { type: 'section', label: t('Offline: {n}', { n: offline.length }) } : null,
+        ...offline.map(row),
+      ].filter(Boolean),
+    };
+  }
+
+  async searchFriends() {
+    const v = await textDialog({ title: 'Search Friends', value: this.friendFilter || '', placeholder: 'Name' });
+    if (v === null) return;
+    this.friendFilter = v.trim();
+    if (this.panelIs('party')) this.rebuildPanel();
+  }
+
+  /** What to do with a friend: all of it happens in the Steam client. */
+  async friendMenu(f, anchor) {
+    const items = [{ id: 'message', label: 'Send Message', icon: 'chat' }];
+    if (f.game && f.lobby) items.push({ id: 'join', label: t('Join {game}', { game: f.game }), icon: 'gamepad' });
+    items.push({ id: 'profile', label: 'View Profile', icon: 'user' });
+    const choice = await optionsMenu({ title: f.name, anchor, items });
+    if (!choice) return;
+    this.close();
+    await openFriend(choice.id, f.id);
+  }
+
   /** Update the party panel in place, or rebuild it when its rows changed. */
   refreshParty() {
     const sig = this.partySig();
@@ -1035,6 +1326,9 @@ export class QuickMenu {
     const v = () => (party.state && party.state.voice) || { mute: false, deaf: false, input: 100, output: 100 };
     const rows = [];
     const call = st.channel;
+    if (!call) {
+      rows.push({ icon: 'discord', label: 'Join a Voice Chat', sub: 'On your Discord servers, or call someone directly', chevron: true, run: () => this.switchTab('discord') });
+    }
     if (call) {
       for (const m of st.members.slice(0, 8)) {
         rows.push({
@@ -1068,17 +1362,131 @@ export class QuickMenu {
       },
     });
     rows.push(
-      { type: 'range', icon: 'volume', label: 'Voice Volume', max: 200, step: 10, value: () => v().output, set: (x) => discordCmd('output', x) },
-      { type: 'range', icon: 'mic', label: 'Mic Volume', step: 5, value: () => v().input, set: (x) => discordCmd('input', x) }
+      { icon: 'volume', label: 'Voice Volume', value: () => `${v().output}%`, chevron: true, run: () => this.voiceSlider('output', 'Voice Volume', 200, 10) },
+      { icon: 'mic', label: 'Mic Volume', value: () => `${v().input}%`, chevron: true, run: () => this.voiceSlider('input', 'Mic Volume', 100, 5) }
     );
     return {
       title: call ? call.name : 'Party',
-      subtitle: call ? call.guild || (call.dm ? 'Direct call' : '') : 'Not in a voice channel',
+      subtitle: call ? call.guild || (call.dm ? 'Direct call' : '') : 'Not in a voice chat',
       rows,
       onOpen: () => {
         if (this.panel) this.panel.partySig = this.partySig();
       },
     };
+  }
+
+  /** Discord's voice / mic volume, on a slider of its own (left / right stay for the rail). */
+  async voiceSlider(kind, title, max, step) {
+    const cur = () => ((party.state && party.state.voice) || {})[kind === 'output' ? 'output' : 'input'] ?? 100;
+    const orig = cur();
+    const v = await sliderDialog({ title: t(title), value: orig, min: 0, max, step, onChange: (nv) => discordCmd(kind, nv) });
+    if (v === null) discordCmd(kind, orig);
+  }
+
+  /** The Discord tab's rows when Discord isn't connected (as the Party tab's). */
+  discordSetupRows() {
+    const def = this.partyPanel();
+    return def.rows;
+  }
+
+  /**
+   * The Discord tab, as on the PS5: Direct Voice Chats, then the servers with
+   * who is in voice on each; a server opens its voice channels, a channel (or
+   * direct chat) joins its call. Back goes up again.
+   */
+  discordPanel() {
+    const st = party.state;
+    if (!st || st.status !== 'ready') return { title: 'Discord', rows: this.discordSetupRows() };
+    const user = st.user;
+    const view = this.dcView || null;
+    const here = (id) => () => !!(party.state && party.state.channel && party.state.channel.id === id);
+    const failed = (list) => !list && this.dcError;
+    const retry = () => ({ icon: 'refresh', label: 'Couldn’t load from Discord', sub: this.dcError, run: () => this.loadDiscordView(true) });
+    if (view) {
+      const list = view.type === 'direct' ? this.dcDirect : (this.dcChannels || {})[view.id];
+      const loading = !list;
+      if (failed(list)) return { title: view.name, rows: [retry()] };
+      return {
+        title: view.name,
+        subtitle: view.type === 'direct' ? '' : 'Voice channels',
+        onOpen: () => this.loadDiscordView(),
+        empty: view.type === 'direct' ? 'Direct chats show up here once you’ve had a message or a call in them.' : 'This server has no voice channels.',
+        rows: loading
+          ? [{ icon: 'refresh', label: 'Loading…', disabled: true }]
+          : list.map((c) => ({
+              type: 'dc',
+              lead: view.type === 'direct' ? 'server' : 'voice',
+              item: () => ((view.type === 'direct' ? this.dcDirect : (this.dcChannels || {})[view.id]) || []).find((x) => x.id === c.id) || c,
+              current: here(c.id),
+              run: () => this.joinVoiceChat(c, view.type === 'direct'),
+            })),
+      };
+    }
+    const guilds = this.dcGuilds;
+    return {
+      headClass: 'dc-head',
+      headHtml: `<span class="dc-badge">${icon('discord')}</span><span>Discord</span>${user ? `<span class="dc-user"><span>${escapeHtml(user.name)}</span><span class="dc-me">${avatarFor(user)}</span></span>` : ''}`,
+      onOpen: () => this.loadDiscordView(),
+      rows: [
+        { type: 'dc', lead: 'phone', item: () => ({ name: 'Direct Voice Chats' }), run: () => this.openDcView({ type: 'direct', name: 'Direct Voice Chats' }) },
+        ...(guilds
+          ? guilds.map((g) => ({
+              type: 'dc',
+              lead: 'server',
+              item: () => (this.dcGuilds || []).find((x) => x.id === g.id) || g,
+              run: () => this.openDcView({ type: 'guild', id: g.id, name: g.name }),
+            }))
+          : failed(guilds)
+            ? [retry()]
+            : [{ icon: 'refresh', label: 'Loading your servers…', disabled: true }]),
+      ],
+    };
+  }
+
+  openDcView(view) {
+    this.dcView = view;
+    this.dcError = null;
+    this.openPanel(this.panel.index, { keepIndex: 0 });
+    this.panel.nav.set(0);
+    this.zone = this.panel.nav.els.length ? 'panel' : 'rail';
+    this.applyFocus();
+    this.loadDiscordView();
+  }
+
+  /** Load what the Discord tab shows (servers, a server's voice channels, direct chats), then show it. */
+  async loadDiscordView(fresh = false) {
+    const view = this.dcView;
+    try {
+      if (!view) this.dcGuilds = await discordGuilds(fresh);
+      else if (view.type === 'direct') this.dcDirect = await discordDirectChats();
+      else this.dcChannels = { ...(this.dcChannels || {}), [view.id]: await discordVoiceChannels(view.id) };
+      this.dcError = null;
+    } catch (err) {
+      // Keep what was shown; with nothing yet, the tab says it couldn't load (and can retry).
+      this.dcError = String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    }
+    if (this.baseTab('discord') && this.dcView === view) this.rebuildPanel();
+  }
+
+  /** Join a voice channel or a direct chat's call; a call nobody is in yet rings, so it asks first. */
+  async joinVoiceChat(c, direct) {
+    const cur = party.state && party.state.channel;
+    if (cur && cur.id === c.id) {
+      this.switchTab('party');
+      return;
+    }
+    if (direct && !(c.members || []).length) {
+      const ok = await confirmDialog({ title: t('Call {name}?', { name: c.name }), message: cur ? t('You’ll leave {name}.', { name: cur.name }) : '', confirmLabel: 'Call' });
+      if (!ok) return;
+    } else if (cur) {
+      const ok = await confirmDialog({ title: t('Join {name}?', { name: c.name }), message: t('You’ll leave {name}.', { name: cur.name }), confirmLabel: 'Join' });
+      if (!ok) return;
+    }
+    if (await joinVoice(c.id)) {
+      sfx.select();
+      this.dcView = null;
+      this.switchTab('party');
+    }
   }
 
   async leaveCall() {
@@ -1412,8 +1820,10 @@ export class QuickMenu {
   handle(action) {
     if (this.customizing) {
       if (action === 'left' || action === 'right') {
-        if (this.barNav.move(action === 'left' ? -1 : 1)) sfx.move();
-        else sfx.bump();
+        if (this.barNav.move(action === 'left' ? -1 : 1)) {
+          sfx.move();
+          waveAcross(this.barNav.current, action === 'left' ? -1 : 1);
+        } else sfx.bump();
       } else if (action === 'confirm') this.toggleCustom(this.barNav.index);
       else if (action === 'back' || action === 'options') this.exitCustomize();
       else sfx.bump();
@@ -1424,12 +1834,23 @@ export class QuickMenu {
       return true;
     }
     if (action === 'back') {
-      if (this.panel) this.closePanel();
+      if (this.panel && this.baseTab('discord') && this.dcView) {
+        this.dcView = null;
+        sfx.back();
+        this.openPanel(this.panel.index, { keepIndex: 0 });
+        this.applyFocus();
+        this.loadDiscordView();
+      } else if (this.panel) this.closePanel();
       else this.close();
       return true;
     }
     if (this.zone === 'cards') {
-      if (action === 'left' || action === 'right') this.cardNav.move(action === 'left' ? -1 : 1) ? sfx.move() : sfx.bump();
+      if (action === 'left' || action === 'right') {
+        this.cardMouse = false;
+        if (this.cardNav.move(action === 'left' ? -1 : 1)) sfx.move();
+        else sfx.bump();
+        this.layoutCards();
+      }
       else if (action === 'down') this.focus('bar', this.barNav.index);
       else if (action === 'confirm') {
         sfx.select();
@@ -1452,14 +1873,50 @@ export class QuickMenu {
           this.panel.nav.set(this.panel.nav.els.length - 1);
           sfx.move();
           this.applyFocus();
+        } else if (this.panel && this.panel.rail) {
+          this.zone = 'rail';
+          sfx.move();
+          this.applyFocus();
         } else if (!this.panel && this.cards.length) this.focus('cards', this.cardNav.index < 0 ? 0 : this.cardNav.index);
         else sfx.bump();
       } else if (action === 'confirm') this.activateBar(this.barNav.index);
       else if (action === 'down') sfx.bump();
       return true;
     }
+    if (this.zone === 'rail' && this.panel && this.panel.rail) {
+      const p = this.panel;
+      if (action === 'up' || action === 'down') {
+        const next = p.railIndex + (action === 'up' ? -1 : 1);
+        if (next < 0) sfx.bump();
+        else if (next >= p.rail.length) {
+          this.zone = 'bar';
+          sfx.move();
+          this.applyFocus();
+        } else {
+          p.railIndex = next;
+          this.switchTab(p.tabs[next].id);
+        }
+      } else if (action === 'right' || action === 'confirm') {
+        if (p.nav.els.length) {
+          this.zone = 'panel';
+          sfx.move();
+          this.applyFocus();
+        } else sfx.bump();
+      } else sfx.bump();
+      return true;
+    }
     if (this.zone === 'panel' && this.panel) {
       const nav = this.panel.nav;
+      // Left from the content goes to the Game Base's rail (sliders keep it, a row of buttons once at its first).
+      if (action === 'left' && this.panel.rail) {
+        const r = nav.current && nav.current._row;
+        if (!r || (r.type !== 'range' && !(r.type === 'buttons' && r.bi > 0))) {
+          this.zone = 'rail';
+          sfx.move();
+          this.applyFocus();
+          return true;
+        }
+      }
       if (action === 'up') {
         if (nav.move(-1)) {
           sfx.move();
