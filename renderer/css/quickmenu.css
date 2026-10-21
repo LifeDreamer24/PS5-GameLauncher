@@ -718,7 +718,7 @@
 .qm-active-dot {
   position: absolute;
   left: 50%;
-  top: calc(50% + 2.4rem);
+  top: calc(50% + 2.4rem + 3px);
   width: 0.7rem;
   height: 0.7rem;
   margin-left: -0.35rem;
