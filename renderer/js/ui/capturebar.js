@@ -113,12 +113,16 @@ export function openCaptureBar({ capture, navigate, onClosed }) {
     const cur = nav.current;
     if (cur === thumb) {
       sfx.select();
-      if (latest) navigate({ view: 'gallery' });
+      if (latest) {
+        ctl.close();
+        navigate({ view: 'gallery' });
+      }
       return;
     }
     const id = cur.dataset.id;
     if (id === 'options') {
       sfx.select();
+      ctl.close();
       navigate({ view: 'settings', params: { category: 'captures' } });
       return;
     }

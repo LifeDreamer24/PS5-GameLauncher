@@ -27,6 +27,7 @@ const SOURCES = [
   { value: 'epic', label: 'Epic Games' },
   { value: 'xbox', label: 'Xbox' },
   { value: 'ubisoft', label: 'Ubisoft Connect' },
+  { value: 'switch', label: 'Nintendo Switch' },
   { value: 'pc', label: 'Shortcuts & PC' },
 ];
 // Steam games the account owns but hasn't installed are in the collection too.
@@ -131,6 +132,7 @@ export class LibraryView {
         if (this.source === 'epic') return src === 'EPIC';
         if (this.source === 'xbox') return src === 'XBOX';
         if (this.source === 'ubisoft') return src === 'UBISOFT';
+        if (this.source === 'switch') return src === 'SWITCH';
         return src === 'PC';
       });
     }
@@ -430,7 +432,7 @@ export class LibraryView {
         if (g) this.openGame(g);
         return true;
       case 'x':
-        if (g) launchGame(g);
+        if (g) launchGame(g, { from: this.gridNav.current });
         return true;
       case 'y':
         if (g) {

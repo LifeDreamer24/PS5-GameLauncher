@@ -178,6 +178,9 @@ class OverlayManager {
     this.visible = false;
     clearInterval(this.focusTimer);
     this.system.setPadForward(false);
+    // Whatever is still open in the page goes too (it opened the launcher, or
+    // the game ended), so it never shows up again with the next menu or toast.
+    this.send('overlay:hidden');
     if ((this.toastUntil || 0) > Date.now()) {
       // A notification arrived while the menu was open (e.g. "Screenshot
       // saved" right after the capture menu closed): leave it on screen,

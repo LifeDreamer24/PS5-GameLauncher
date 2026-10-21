@@ -234,6 +234,7 @@ async function pool(items, size, fn) {
 }
 
 module.exports = {
+  scoreMatch,
   searchSteam,
   resolveSteamAppId,
   fetchStoreItems,

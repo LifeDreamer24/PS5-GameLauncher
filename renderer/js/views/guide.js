@@ -2,6 +2,7 @@
 // clicks outside the launcher. Rendered by the settings view ('step' items).
 
 import { api } from '../state.js';
+import { addGameFolder } from '../ui/filebrowser.js';
 
 const step = (n, label) => ({ type: 'step', n, label });
 
@@ -22,7 +23,7 @@ export function guideCategory(router) {
           step(2, 'For any other game, make a folder (for example "D:\\Game Shortcuts") and put shortcuts to your games in it: .lnk, .url or .exe files.'),
           step(3, 'Open Settings › Library and choose Add Folder…, then pick that folder. You can also drag a shortcut or a folder onto the window.'),
           step(4, 'Artwork, logos and descriptions are downloaded automatically. If a game shows the wrong art, open its … menu and choose Change Artwork › Find on Steam…'),
-          { type: 'action', icon: 'folderPlus', label: 'Add a Game Folder…', run: () => api.addFolder() },
+          { type: 'action', icon: 'folderPlus', label: 'Add a Game Folder…', run: () => addGameFolder() },
           { type: 'action', icon: 'settings', label: 'Open Library Settings', run: go('library') },
         ],
       },
@@ -76,7 +77,7 @@ export function guideCategory(router) {
           step(2, 'Install VIIPER (button below, take viiper-windows-amd64.exe and choose Install). It brings usbip-win2, the driver the virtual controller needs. The launcher makes the virtual controller itself.'),
           step(3, 'In the launcher, open Settings › System › In-Game Overlay and turn on Block Controller in Games While Menus Are Open. The status line should say 1 controller.'),
           step(4, 'Your DualSense briefly disconnects and reconnects by itself, so programs like Steam that already had it open switch to the virtual one. If a game still reacts to it while a menu is open, turn the controller off and on once.'),
-          step(5, 'In games, the controller now works as usual, and the quick menu no longer moves you around in the game. Rumble, adaptive triggers, the lightbar, the player lights and HD haptics reach your controller. The DualSense speaker only works with the controller on USB.'),
+          step(5, 'In games, the controller now works as usual, and the quick menu no longer moves you around in the game. Rumble, adaptive triggers, the lightbar, the player lights, HD haptics and the sound for the controller speaker reach your controller.'),
           { type: 'action', icon: 'external', label: 'Open the HidHide Download Page', run: () => api.openExternal('https://github.com/nefarius/HidHide/releases') },
           { type: 'action', icon: 'external', label: 'Open the VIIPER Download Page', run: () => api.openExternal('https://github.com/Alia5/VIIPER/releases') },
           { type: 'action', icon: 'settings', label: 'Go to Overlay Settings', run: go('system', 'In-Game Overlay') },

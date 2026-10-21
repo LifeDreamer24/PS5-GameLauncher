@@ -108,6 +108,12 @@ async function main() {
   initDualsense();
   // In-game sleep: close the audio output until the next menu or notification.
   on('sleep', (asleep) => asleep && resetAudio());
+  // The window was hidden without the page closing its menu (it opened the
+  // launcher, or the game ended): close what is left, quietly.
+  api.on('overlay:hidden', () => {
+    if (capture) capture.close();
+    if (quick.ctl) quick.close({ quiet: true });
+  });
   api.on('overlay:close', () => {
     if (capture) closeCapture();
     else if (quick.ctl) quick.close();

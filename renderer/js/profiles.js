@@ -3,6 +3,7 @@
 // the rest of the UI only ever reads those.
 
 import { api, state, on, emit } from './state.js';
+import { pickImage } from './ui/filebrowser.js';
 
 const uid = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
@@ -71,7 +72,9 @@ export async function removeProfile(id) {
 
 /** Ask for a picture file; returns its app:// URL or null. */
 export async function pickProfileImage(id) {
-  const url = await api.pickProfileImage();
+  const file = await pickImage('Choose a Profile Picture', 'avatar');
+  if (!file) return null;
+  const url = await api.pickProfileImage(file);
   if (!url) return null;
   const old = profiles().find((p) => p.id === id);
   await updateProfile(id, { image: url });

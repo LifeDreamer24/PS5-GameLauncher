@@ -15,6 +15,7 @@ export const sys = {
   outputs: null, // playback devices [{ id, name, desc, adapter, default }]
   displays: null, // [{ name, percent, method }]
   nightLight: null, // true / false, null = unknown or unsupported
+  hdr: null, // [{ name, supported, on }] per display, null = not read yet
   bt: null, // { available, on, devices: [...] }
   btScan: null, // { scanning, devices: [...] }
 };
@@ -289,6 +290,38 @@ export async function loadNightLight() {
   }
   emit('nightlight');
   return sys.nightLight;
+}
+
+/* ------------------------------------------------------------------ */
+/* HDR                                                                 */
+/* ------------------------------------------------------------------ */
+
+export async function loadHdr() {
+  try {
+    sys.hdr = (await api.getHdr()) || [];
+  } catch {
+    sys.hdr = [];
+  }
+  emit('hdr');
+  return sys.hdr;
+}
+
+/** The displays that can show HDR. */
+export function hdrDisplays() {
+  return (sys.hdr || []).map((d, index) => ({ ...d, index })).filter((d) => d.supported);
+}
+
+/** Windows' "Use HDR" for one display (index into sys.hdr). The screen goes dark for a moment while it switches. */
+export async function setHdr(index, on) {
+  if (sys.hdr && sys.hdr[index]) sys.hdr[index] = { ...sys.hdr[index], on: !!on };
+  emit('hdr');
+  try {
+    await api.setHdr(!!on, index);
+  } catch (err) {
+    pushNotification({ title: 'HDR', body: cleanError(err), icon: 'display' });
+  }
+  // What Windows ended up with (a display can refuse).
+  setTimeout(loadHdr, 1500);
 }
 
 export async function setNightLight(on) {

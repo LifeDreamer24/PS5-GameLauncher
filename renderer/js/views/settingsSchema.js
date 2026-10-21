@@ -13,12 +13,18 @@ import { activeProfileId, pickProfileImage, updateProfile } from '../profiles.js
 import { connectedPads } from '../input.js';
 import { refreshDualsense, modelName, powerLabel, batteryText, connectionLabel } from '../dualsense.js';
 import { loadStorage, storageItems } from './storage.js';
+import { browseFiles, addGameFolder, addGameFiles, showFolder } from '../ui/filebrowser.js';
+import { loadEmulators, emulatorItems } from './emulators.js';
+import { loadEncoders, encoderItems } from './captureEncoders.js';
 import {
   sys,
   setVolume,
   setMute,
   setBrightness,
   setNightLight,
+  loadHdr,
+  setHdr,
+  hdrDisplays,
   loadBluetooth,
   setBluetooth,
   connectDevice,
@@ -204,7 +210,7 @@ function passthroughItems() {
     } else if (st.enabled) {
       value = st.devices ? t(st.devices === 1 ? '1 controller' : '{n} controllers', { n: st.devices }) : 'Waiting for a controller';
       cls = st.devices ? 'ok' : '';
-      note = 'Games now see a virtual DualSense that goes quiet while the quick menu or the launcher is in front. What games send it reaches your controller: rumble, adaptive triggers, lights and HD haptics (over Bluetooth at a lower rate; the speaker only over USB). Your controller reconnects by itself once when this turns on, so games that had it open switch over.';
+      note = 'Games now see a virtual DualSense that goes quiet while the quick menu or the launcher is in front. What games send it reaches your controller: rumble, adaptive triggers, lights, HD haptics and the controller speaker. Your controller reconnects by itself once when this turns on, so games that had it open switch over.';
     } else if (st.error) value = st.error;
     // Programs on HidHide's own list still read the real controller (double input).
     if (st.enabled && st.allowed && st.allowed.length) {
@@ -313,7 +319,9 @@ function packChoiceItems(kind) {
     });
   }
   const install = (from) => async () => {
-    const p = await api.installSoundPack(from);
+    const picked = await browseFiles(from === 'folder' ? { title: 'Choose a Sound Pack Folder', mode: 'folder', key: 'sounds' } : { title: 'Choose a Sound Pack', mode: 'file', exts: ['zip'], key: 'sounds' });
+    if (!picked) return;
+    const p = await api.installSoundPack(from, picked);
     if (!p) return;
     await loadPacks();
     await setSetting(isUiPack(p) ? 'soundPack' : 'musicPack', p.id);
@@ -485,43 +493,7 @@ function capturesCategory() {
           { type: 'choice', key: 'captureFps', label: 'Frame Rate', options: [30, 60, 120].map((v) => ({ value: v, label: t('{n} fps', { n: v }) })) },
         ],
       },
-      {
-        label: 'Encoder and Quality',
-        items: () => {
-          const items = [
-            {
-              type: 'choice',
-              key: 'captureEncoder',
-              label: 'Encoder',
-              options: [
-                { value: 'auto', label: 'Automatic' },
-                { value: 'nvenc', label: 'NVIDIA NVENC' },
-                { value: 'amd', label: 'AMD' },
-                { value: 'qsv', label: 'Intel Quick Sync' },
-                { value: 'x264', label: 'Software (x264)' },
-              ],
-            },
-            {
-              type: 'choice',
-              key: 'captureQuality',
-              label: 'Quality',
-              options: [
-                { value: 'standard', label: 'Standard (set bitrate)' },
-                { value: 'high', label: 'High' },
-                { value: 'best', label: 'Very High' },
-              ],
-            },
-          ];
-          if (state.settings.captureQuality === 'standard') {
-            items.push({ type: 'choice', key: 'captureBitrate', label: 'Bitrate', options: [10000, 20000, 40000, 60000].map((v) => ({ value: v, label: t('{n} Mbps', { n: v / 1000 }) })) });
-          }
-          items.push(
-            { type: 'choice', key: 'captureFormat', label: 'Video Format', options: [{ value: 'mp4', label: 'MP4' }, { value: 'mkv', label: 'MKV' }] },
-            { type: 'note', label: 'Automatic picks your graphics card’s hardware encoder. Changes apply when nothing is recording.' }
-          );
-          return items;
-        },
-      },
+      { label: 'Encoder and Quality', items: encoderItems, onEnter: () => loadEncoders() },
       {
         label: 'Audio',
         items: () => [
@@ -538,8 +510,16 @@ function capturesCategory() {
         onEnter: loadCapture,
         items: () => [
           { type: 'info', label: 'Folder', value: (state.capture && state.capture.dir) || '…' },
-          { type: 'action', icon: 'folder', label: 'Change Folder…', run: () => api.capturePickDir().then(loadCapture) },
-          { type: 'action', icon: 'external', label: 'Open Folder', run: () => api.captureOpenFolder() },
+          {
+            type: 'action',
+            icon: 'folder',
+            label: 'Change Folder…',
+            run: async () => {
+              const dir = await browseFiles({ title: 'Choose Where Captures Are Saved', mode: 'folder', start: await api.captureDir() });
+              if (dir) await api.capturePickDir(dir).then(loadCapture);
+            },
+          },
+          { type: 'action', icon: 'folder', label: 'Open Folder', run: async () => showFolder('Captures', await api.captureDir()) },
         ],
       },
     ],
@@ -590,7 +570,7 @@ export function buildSchema(router) {
       id: 'library',
       label: 'Library',
       icon: 'fLibrary',
-      desc: 'Game folders, automatic scanning and artwork',
+      desc: 'Game folders, emulators, scanning and artwork',
       sections: [
         {
           label: 'Game Folders',
@@ -623,11 +603,12 @@ export function buildSchema(router) {
               },
             })),
             (state.settings.folders || []).length ? null : { type: 'info', label: 'No folders added yet', value: '' },
-            { type: 'action', label: 'Add Folder…', icon: 'folderPlus', run: () => api.addFolder() },
-            { type: 'action', label: 'Add Games from Files…', icon: 'file', run: () => api.addFiles() },
+            { type: 'action', label: 'Add Folder…', icon: 'folderPlus', run: () => addGameFolder() },
+            { type: 'action', label: 'Add Games from Files…', icon: 'file', run: () => addGameFiles() },
             { type: 'note', label: 'Shortcuts (.lnk, .url), executables and sub-folders with installed games are detected. You can also drag and drop shortcuts onto the launcher.' },
           ],
         },
+        { label: 'Emulators', items: emulatorItems, onEnter: () => loadEmulators() },
         {
           label: 'Scanning',
           items: () => [
@@ -824,6 +805,14 @@ export function buildSchema(router) {
         {
           label: 'Display',
           items: () => [
+            ...hdrDisplays().map((d, _i, all) => ({
+              type: 'toggle',
+              icon: 'display',
+              label: all.length > 1 ? t('HDR · {name}', { name: d.name || t('Display {n}', { n: d.index + 1 }) }) : 'HDR',
+              get: () => !!(sys.hdr[d.index] && sys.hdr[d.index].on),
+              set: (v) => setHdr(d.index, v),
+            })),
+            sys.hdr && sys.hdr.length && !hdrDisplays().length ? { type: 'info', icon: 'display', label: 'HDR', value: 'Not supported by this display' } : null,
             sys.nightLight === null
               ? null
               : { type: 'toggle', icon: 'nightLight', label: 'Night Light', get: () => !!sys.nightLight, set: (v) => setNightLight(v) },
@@ -1039,7 +1028,7 @@ export function buildSchema(router) {
             { type: 'info', label: 'Games', value: String(state.games.filter((g) => g.category !== 'media').length) },
             { type: 'info', label: 'Media Apps', value: String(state.games.filter((g) => g.category === 'media').length) },
             { type: 'info', label: 'Artwork Cache', value: state.cacheSize == null ? 'Calculating…' : fmtBytes(state.cacheSize), async: 'cache' },
-            { type: 'action', label: 'Open Data Folder', icon: 'folder', run: () => api.openDataFolder() },
+            { type: 'action', label: 'Open Data Folder', icon: 'folder', run: async () => showFolder('Data Folder', await api.dataDir()) },
             {
               type: 'action',
               label: 'Reset Library',

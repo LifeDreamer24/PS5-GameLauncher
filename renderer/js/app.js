@@ -253,8 +253,11 @@ async function main() {
     const action = typeof a === 'string' ? a : a && a.action;
     if (action === 'guide') {
       if (!booting) externalAction('guide');
-    } else if (action && ((state.passthrough && state.passthrough.enabled) || padFallback)) externalAction(action, { repeat: !!(a && a.repeat), kind: a && a.kind });
+    } else if (action && ((state.passthrough && state.passthrough.enabled) || padFallback || passthroughStarting)) externalAction(action, { repeat: !!(a && a.repeat), kind: a && a.kind });
   });
+  // Passthrough is being switched on (at startup): the controller's presses
+  // come through the helper already, so it can be used right away.
+  let passthroughStarting = !!state.settings.controllerPassthrough;
   // Passthrough just went off: until the browser sees the real controller
   // again (it reconnects), keep reading it through the helper.
   let padFallback = false;
@@ -270,6 +273,7 @@ async function main() {
     const was = !!(state.passthrough && state.passthrough.enabled);
     state.passthrough = st || null;
     const now = !!(st && st.enabled);
+    passthroughStarting = false;
     if (now) {
       setGamepadProbe(null);
       setGamepadPolling(false);
@@ -286,6 +290,7 @@ async function main() {
       // Passthrough is off, or it couldn't start: the launcher reads controllers itself.
       // (Right after startup it isn't on yet either; then it is about to start.)
       const starting = state.settings.controllerPassthrough && st && !st.error && !['missing', 'nodriver', 'error', 'denied'].includes(st.viiper) && !['missing', 'denied', 'error'].includes(st.hidhide);
+      passthroughStarting = starting;
       if (!starting) useGamepadApi();
       setGamepadPolling(true);
     }

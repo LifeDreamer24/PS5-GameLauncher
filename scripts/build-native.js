@@ -9,6 +9,7 @@ const path = require('path');
 const dir = path.join(__dirname, '..', 'main', 'native');
 const exe = path.join(dir, 'syshelper.exe');
 const src = path.join(dir, 'syshelper.cs');
+const opus = path.join(dir, 'Concentus.dll'); // built in when it is there (scripts/fetch-concentus.js)
 
 if (process.platform !== 'win32') {
   console.log('syshelper: skipped (Windows only)');
@@ -16,7 +17,8 @@ if (process.platform !== 'win32') {
 }
 
 const force = process.argv.includes('--force');
-const stale = !fs.existsSync(exe) || fs.statSync(exe).mtimeMs < fs.statSync(src).mtimeMs;
+const built = fs.existsSync(exe) ? fs.statSync(exe).mtimeMs : 0;
+const stale = built < fs.statSync(src).mtimeMs || (fs.existsSync(opus) && built < fs.statSync(opus).mtimeMs);
 if (!force && !stale) process.exit(0);
 
 console.log('Building main/native/syshelper.exe ...');

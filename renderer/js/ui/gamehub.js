@@ -7,6 +7,7 @@ import { api, artUrl, state, on, playtimeOf, lastActive, sourceLabel, sourceName
 import { FocusList } from './overlay.js';
 import { mouseActive } from '../input.js';
 import { launchGame, gameOptions, isRunning } from './gameactions.js';
+import { addGameFolder, addGameFiles, showGameLocation } from './filebrowser.js';
 import { screenshotViewer, infoDialog } from './dialogs.js';
 import { tileArt } from './tiles.js';
 import { sliderHtml, setSlider, dragSlider } from './slider.js';
@@ -117,16 +118,16 @@ export class HubPanel {
     const dl = downloadFor(g);
     this.dlMode = dl ? (ACTIVE.has(dl.status) ? 'active' : 'update') : isInstalled(g) ? 'play' : 'download';
     const primary = running
-      ? { label: 'Continue', icon: 'play', primary: true, run: () => launchGame(findGame(g.id) || g) }
+      ? { label: 'Continue', icon: 'play', primary: true, run: (el) => launchGame(findGame(g.id) || g, { from: el }) }
       : this.dlMode === 'update'
         ? { label: dl.status === 'error' ? 'Try Again' : 'Update', icon: 'download', primary: true, run: () => (isInstalled(g) ? startUpdate : startInstall)(findGame(g.id) || g) }
         : this.dlMode === 'active'
           ? { label: dl.status === 'paused' ? 'Resume' : 'View Download', icon: 'download', primary: true, run: () => (dl.status === 'paused' ? startUpdate(findGame(g.id) || g) : this.host.openView('downloads')) }
           : this.dlMode === 'download'
             ? { label: 'Download', icon: 'download', primary: true, run: () => startInstall(findGame(g.id) || g) }
-            : { label: 'Play Game', icon: 'play', primary: true, run: () => launchGame(findGame(g.id) || g) };
+            : { label: 'Play Game', icon: 'play', primary: true, run: (el) => launchGame(findGame(g.id) || g, { from: el }) };
     this.actionDefs = [primary, { icon: 'more', round: true, label: 'Options', run: (el) => gameOptions(findGame(g.id) || g, el) }];
-    if (this.dlMode === 'active' && dl.status === 'paused' && isInstalled(g)) this.actionDefs.splice(1, 0, { label: 'Play Game', icon: 'play', run: () => launchGame(findGame(g.id) || g) });
+    if (this.dlMode === 'active' && dl.status === 'paused' && isInstalled(g)) this.actionDefs.splice(1, 0, { label: 'Play Game', icon: 'play', run: (el) => launchGame(findGame(g.id) || g, { from: el }) });
 
     const shots = g.screenshots || [];
     const m = g.meta || {};
@@ -141,7 +142,7 @@ export class HubPanel {
             <div><b>${g.launchCount || 0}</b><span>${t('Launches')}</span></div>
           </div>
           <div class="card-foot">${escapeHtml(t('Added {date}', { date: fmtDate(g.addedAt) }))}</div>`,
-        run: () => launchGame(findGame(g.id) || g),
+        run: (el) => launchGame(findGame(g.id) || g, { from: el }),
       },
       {
         cls: 'card-about',
@@ -176,7 +177,7 @@ export class HubPanel {
           ${g.steamAppId ? `<dt>${t('Steam App')}</dt><dd>${escapeHtml(g.steamAppId)}</dd>` : ''}
         </dl>
         ${isInstalled(g) ? `<div class="card-foot">${icon('external')} ${t('Open file location')}</div>` : ''}`,
-      run: () => (isInstalled(g) ? api.openLocation(g.id) : this.showDetails(g)),
+      run: () => (isInstalled(g) ? showGameLocation(g) : this.showDetails(g)),
     });
   }
 
@@ -210,7 +211,7 @@ export class HubPanel {
       {
         cls: 'card-action',
         html: `<div class="card-head">${icon('folderPlus')}<span>${t('Add a Game Folder')}</span></div><div class="about-text">${t('Pick a folder with game shortcuts (.lnk, .url, .exe). Artwork is fetched from Steam automatically.')}</div>`,
-        run: () => api.addFolder(),
+        run: () => addGameFolder(),
       },
       {
         cls: 'card-action',
@@ -315,7 +316,7 @@ export class HubPanel {
       })
     );
     this.actionDefs = [
-      { label: 'Add Game Folder', icon: 'folderPlus', primary: true, run: () => api.addFolder() },
+      { label: 'Add Game Folder', icon: 'folderPlus', primary: true, run: () => addGameFolder() },
       { label: 'Scan for Games', icon: 'refresh', run: () => api.scan() },
     ];
     this.cardDefs = [];
@@ -389,9 +390,10 @@ export class HubPanel {
     this.cardsTrack.style.transform = `translateX(${-next}px)`;
   }
 
-  activateAction(i) {
+  /** from: what was pressed instead of the button (a game's cover on the home screen). */
+  activateAction(i, from = null) {
     const a = this.actionDefs[i];
-    if (a && a.run) a.run(this.actions.els[i]);
+    if (a && a.run) a.run(from || this.actions.els[i]);
   }
 
   activateCard(i) {
@@ -412,8 +414,9 @@ export class HubPanel {
       ['Released', m.released ? fmtDate(m.released) : ''],
       ['Source', sourceName(g)],
       ['Steam App ID', g.steamAppId],
+      ['Title ID', g.titleId],
       ['Install folder', g.installDir],
-      ['Shortcut', g.path],
+      [g.source === 'emulator' ? 'Game File' : 'Shortcut', g.path],
       ['Launch', g.launch ? g.launch.target : ''],
     ].filter(([, v]) => v);
     infoDialog({
@@ -437,8 +440,8 @@ export async function addGamesMenu(anchor) {
     title: 'Add Games',
     anchor,
     items: [
-      { label: 'Add Game Folder…', icon: 'folderPlus', run: () => api.addFolder() },
-      { label: 'Add Games from Files…', icon: 'file', run: () => api.addFiles() },
+      { label: 'Add Game Folder…', icon: 'folderPlus', run: () => addGameFolder() },
+      { label: 'Add Games from Files…', icon: 'file', run: () => addGameFiles() },
       { label: 'Scan for Games Now', icon: 'refresh', run: () => api.scan() },
     ],
   });

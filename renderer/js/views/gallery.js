@@ -14,6 +14,7 @@ import { mountOverlay, FocusList } from '../ui/overlay.js';
 import { optionsMenu, confirmDialog, filterPanel, checkMenu } from '../ui/dialogs.js';
 import { renderHints } from '../ui/glyphs.js';
 import { t } from '../i18n.js';
+import { showFolder } from '../ui/filebrowser.js';
 
 const COLS = 3;
 const TABS = [
@@ -457,7 +458,7 @@ export class GalleryView {
             await this.load(true);
           },
         },
-        { label: 'Show in Folder', icon: 'folder', run: () => api.captureReveal(c.file) },
+        { label: 'Show in Folder', icon: 'folder', run: async () => showFolder('Captures', await api.captureDir(), c.file) },
         {
           label: 'Delete',
           icon: 'trash',
@@ -783,7 +784,6 @@ function openViewer(list, start, { onMove, onChange } = {}) {
       ...(video ? [['confirm', 'Play / Pause'], ['l1', '-5 s'], ['r1', '+5 s']] : []),
       ['adjust', 'Previous / Next'],
       ['y', full ? 'Exit Full Screen' : 'Full Screen'],
-      ['options', 'Options'],
       ...(full ? [] : [['back', 'Close']]), // in full screen, back leaves full screen (shown on the y hint)
     ]);
   }
@@ -852,36 +852,8 @@ function openViewer(list, start, { onMove, onChange } = {}) {
         if (video.paused) video.play().catch(() => {});
         else video.pause();
       } else if (action === 'options') {
-        const c = list[i];
-        optionsMenu({
-          title: c.game || 'Captures',
-          items: [
-            {
-              label: c.favorite ? 'Remove from Favorites' : 'Add to Favorites',
-              icon: c.favorite ? 'starFill' : 'star',
-              run: async () => {
-                await api.captureFavorite(c.file, !c.favorite).catch(() => {});
-                c.favorite = !c.favorite;
-                show();
-                onChange && onChange();
-              },
-            },
-            { label: 'Show in Folder', icon: 'folder', run: () => api.captureReveal(c.file) },
-            {
-              label: 'Delete',
-              icon: 'trash',
-              danger: true,
-              run: async () => {
-                const v = stage.querySelector('video');
-                if (v) v.pause();
-                if (await removeCapture(c)) {
-                  vctl.close();
-                  onChange && onChange();
-                }
-              },
-            },
-          ],
-        });
+        // Not while looking at a capture: Favorite, Show in Folder and Delete are in the gallery's Options.
+        sfx.bump();
       }
       return true;
     },

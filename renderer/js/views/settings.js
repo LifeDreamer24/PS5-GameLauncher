@@ -11,7 +11,7 @@ import { optionsMenu, textDialog, sliderDialog } from '../ui/dialogs.js';
 import { renderHints } from '../ui/glyphs.js';
 import { buildSchema } from './settingsSchema.js';
 import { sliderHtml } from '../ui/slider.js';
-import { loadVolume, loadBrightness, loadNightLight } from '../system.js';
+import { loadVolume, loadBrightness, loadNightLight, loadHdr } from '../system.js';
 import { t } from '../i18n.js';
 
 export class SettingsView {
@@ -35,11 +35,14 @@ export class SettingsView {
     on('soundpacks', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
     on('passthrough', () => this.active && this.cat && this.cat.id === 'system' && rerender());
     on('capture-state', () => this.active && this.cat && this.cat.id === 'captures' && rerender());
+    on('capture-encoders', () => this.active && this.cat && this.cat.id === 'captures' && rerender());
     on('brightness', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('nightlight', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
+    on('hdr', () => this.active && this.cat && this.cat.id === 'screen' && rerender());
     on('bluetooth', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());
     on('dualsense', () => this.active && this.cat && this.cat.id === 'accessories' && rerender());
     on('storage', () => this.active && this.cat && this.cat.id === 'storage' && rerender());
+    on('emulators', () => this.active && this.cat && this.cat.id === 'library' && rerender());
     on('btscan', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());
     on('discord', () => this.active && this.cat && this.cat.id === 'users' && rerender());
   }
@@ -157,6 +160,7 @@ export class SettingsView {
     if (this.cat.id === 'screen') {
       loadBrightness();
       loadNightLight();
+      loadHdr();
     }
     if (this.cat.onEnter) this.cat.onEnter();
     this.renderNav();
@@ -279,8 +283,9 @@ export class SettingsView {
       case 'toggle':
         return `${label}<span class="switch${(d.get ? d.get() : s[d.key]) ? ' on' : ''}"><i></i></span>`;
       case 'choice': {
-        const opt = d.options.find((o) => String(o.value) === String(s[d.key]));
-        return `${label}<span class="si-value">${escapeHtml(opt ? t(opt.label) : String(s[d.key] ?? ''))}</span>`;
+        const cur = d.get ? d.get() : s[d.key];
+        const opt = d.options.find((o) => String(o.value) === String(cur));
+        return `${label}<span class="si-value">${escapeHtml(opt ? t(opt.label) : String(cur ?? ''))}</span>`;
       }
       case 'range': {
         const v = (d.get ? d.get() : s[d.key]) ?? 0;
@@ -351,14 +356,20 @@ export class SettingsView {
         break;
       case 'choice': {
         sfx.select();
+        // get/set: a value that isn't a setting of its own (one encoder's settings, say).
+        const cur = d.get ? d.get() : s[d.key];
         const choice = await optionsMenu({
           title: t(d.label),
           anchor: el,
           side: 'below-right',
-          index: Math.max(0, d.options.findIndex((o) => String(o.value) === String(s[d.key]))),
-          items: d.options.map((o) => ({ label: t(o.label), value: o.value, checked: String(o.value) === String(s[d.key]) })),
+          index: Math.max(0, d.options.findIndex((o) => String(o.value) === String(cur))),
+          items: d.options.map((o) => ({ label: t(o.label), hint: o.hint, value: o.value, checked: String(o.value) === String(cur) })),
         });
-        if (choice) await setSetting(d.key, choice.value);
+        if (choice && String(choice.value) !== String(cur)) {
+          if (d.set) await d.set(choice.value);
+          else await setSetting(d.key, choice.value);
+          this.renderList(true);
+        }
         break;
       }
       case 'range': {

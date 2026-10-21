@@ -151,7 +151,7 @@ export function openSearch(router) {
         else if (action === 'confirm' && g) openGame(g);
         else if (action === 'x' && g) {
           close();
-          launchGame(g);
+          launchGame(g, { from: nav.current });
         } else if (action === 'options' && g) gameOptions(g, nav.current);
         return true;
       }

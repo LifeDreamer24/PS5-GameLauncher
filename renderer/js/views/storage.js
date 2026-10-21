@@ -90,12 +90,15 @@ const canDelete = (g) => g.deletable && !g.running;
 export async function deleteGames(list) {
   if (!list.length) return false;
   const steam = list.filter((g) => g.source === 'steam');
-  const pc = list.filter((g) => g.source !== 'steam');
+  const pc = list.filter((g) => g.source !== 'steam' && g.source !== 'emulator');
+  // Emulated games: their ROM file (saves stay with the emulator).
+  const roms = list.filter((g) => g.source === 'emulator');
   const names = list.slice(0, 5).map((g) => `• ${g.name}`);
   if (list.length > 5) names.push(t('and {n} more', { n: list.length - 5 }));
   const lines = [names.join('\n')];
   if (steam.length) lines.push(t('Steam closes and starts again in the background to remove its games. Saves in Steam Cloud stay.'));
   if (pc.length) lines.push(`${t('These folders are deleted for good, not moved to the Recycle Bin:')}\n${pc.map((g) => g.root).join('\n')}`);
+  if (roms.length) lines.push(`${t('These game files are deleted for good, not moved to the Recycle Bin. Saves stay in the emulator:')}\n${roms.map((g) => g.root).join('\n')}`);
   const ok = await confirmDialog({
     title: list.length === 1 ? t('Delete {name}?', { name: list[0].name }) : t('Delete {n} games?', { n: list.length }),
     message: lines.join('\n\n'),
@@ -135,7 +138,7 @@ export async function deleteGame(game) {
 
 /** Whether a game's Options get a Delete entry (Steam and PC games on this PC). */
 export function offersDelete(game) {
-  return game && (game.source === 'steam' || game.source === 'folder' || game.source === 'manual') && game.installed !== false;
+  return game && (game.source === 'steam' || game.source === 'folder' || game.source === 'manual' || game.source === 'emulator') && game.installed !== false;
 }
 
 const SORTS = [

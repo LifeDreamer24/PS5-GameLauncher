@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   refreshArt: invoke('game:refreshArt'),
   setMatch: invoke('game:setMatch'),
   customArt: invoke('game:customArt'),
-  openLocation: invoke('game:openLocation'),
+  gameLocation: invoke('game:location'),
   pickProfileImage: invoke('profile:pickImage'),
   removeProfileImage: invoke('profile:removeImage'),
   launch: invoke('game:launch'),
@@ -43,12 +43,12 @@ contextBridge.exposeInMainWorld('api', {
   downloadsInstallInfo: invoke('downloads:installInfo'),
   downloadsOpenSteam: invoke('downloads:openSteam'),
   captureState: invoke('capture:state'),
+  captureEncoders: invoke('capture:encoders'),
   captureList: invoke('capture:list'),
   captureAction: invoke('capture:action'),
   captureDelete: invoke('capture:delete'),
   captureFavorite: invoke('capture:favorite'),
-  captureReveal: invoke('capture:reveal'),
-  captureOpenFolder: invoke('capture:openFolder'),
+  captureDir: invoke('capture:dir'),
   capturePickDir: invoke('capture:pickDir'),
   captureOpen: invoke('capture:open'),
   padFallback: invoke('pad:fallback'),
@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld('api', {
   setBrightness: invoke('sys:setBrightness'),
   getNightLight: invoke('sys:nightLight'),
   setNightLight: invoke('sys:setNightLight'),
+  getHdr: invoke('sys:hdr'),
+  setHdr: invoke('sys:setHdr'),
   btState: invoke('bt:state'),
   btRadio: invoke('bt:radio'),
   btConnect: invoke('bt:connect'),
@@ -90,7 +92,21 @@ contextBridge.exposeInMainWorld('api', {
   btUnpair: invoke('bt:unpair'),
   btScan: invoke('bt:scan'),
   cacheSize: invoke('cache:size'),
-  openDataFolder: invoke('app:openData'),
+  dataDir: invoke('app:dataDir'),
+
+  // The launcher's own file browser (renderer/js/ui/filebrowser.js)
+  fsList: invoke('fs:list'),
+  fsPlaces: invoke('fs:places'),
+  fsIcon: invoke('fs:icon'),
+  fsMkdir: invoke('fs:mkdir'),
+  fsKind: invoke('fs:kind'),
+  fsShowInExplorer: invoke('fs:showInExplorer'),
+  fsOpen: invoke('fs:open'),
+
+  emulatorsInfo: invoke('emulators:info'),
+  emulatorsSet: invoke('emulators:set'),
+  emulatorsRemove: invoke('emulators:remove'),
+  emulatorsPads: invoke('emulators:pads'),
   openExternal: invoke('app:openExternal'),
   windowAction: invoke('window:action'),
   power: invoke('power:action'),
@@ -98,7 +114,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'app:sleep', 'downloads:state'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'app:sleep', 'downloads:state'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

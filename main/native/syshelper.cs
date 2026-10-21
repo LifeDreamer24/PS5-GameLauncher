@@ -54,7 +54,7 @@ namespace PS5GameLauncher
         static void Main()
         {
             AppDomain.CurrentDomain.UnhandledException += (s, e) => GameWin.ResumeAll();
-            AppDomain.CurrentDomain.ProcessExit += (s, e) => { GameWin.ResumeAll(); Passthrough.Disable(); };
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => { GameWin.ResumeAll(); Passthrough.ShutDown(); };
             stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
             var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
             stdout.WriteLine("{\"ready\":true}");
@@ -67,7 +67,7 @@ namespace PS5GameLauncher
                 ThreadPool.QueueUserWorkItem(_ => Process(copy));
             }
             BtScan.Stop();
-            Passthrough.Disable();
+            Passthrough.ShutDown();
             GameWin.ResumeAll();
         }
 
@@ -159,6 +159,8 @@ namespace PS5GameLauncher
                 case "brightness": return Monitors.Get();
                 case "setBrightness": return Monitors.Set(Int(req, "value", 50), Int(req, "index", -1));
                 case "nightLight": return NightLight.Get();
+                case "hdr": return Hdr.Get();
+                case "setHdr": return Hdr.Set(Bool(req, "value"), Int(req, "index", -1));
                 case "setNightLight": return NightLight.Set(Bool(req, "value"));
                 case "bt": return Bluetooth.State();
                 case "btRadio": return Bluetooth.SetRadio(Bool(req, "value"));
@@ -184,6 +186,7 @@ namespace PS5GameLauncher
                 case "passthroughMute": return Passthrough.SetMuted(Bool(req, "value"));
                 case "passthroughStatus": return Passthrough.Status();
                 case "dualsenseInfo": return PadInfo.List(Bool(req, "refresh"));
+                case "gamepads": return Pad.Gamepads();
                 case "drives":
                     // Local drives (Settings › Storage): letter, label, size and free space.
                     return DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady).Select(d => new Dictionary<string, object>
@@ -1167,6 +1170,104 @@ namespace PS5GameLauncher
 
     // Windows keeps the Night Light switch in a CloudStore blob. Byte 18 is the
     // payload size: 0x15 when the "enabled" field (0x10 0x00) is present.
+    /// <summary>
+    /// HDR per display, as Windows' own "Use HDR" switch (Settings > Display) sets
+    /// it. Windows 11 24H2 and later have their own HDR state (advanced color can
+    /// also be just wide color there); older ones only have advanced color.
+    /// </summary>
+    static class Hdr
+    {
+        [DllImport("user32.dll")] static extern int GetDisplayConfigBufferSizes(uint flags, out uint paths, out uint modes);
+        [DllImport("user32.dll")] static extern int QueryDisplayConfig(uint flags, ref uint paths, IntPtr pathArray, ref uint modes, IntPtr modeArray, IntPtr topology);
+        [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(IntPtr packet);
+        [DllImport("user32.dll")] static extern int DisplayConfigSetDeviceInfo(IntPtr packet);
+
+        const int GET_TARGET_NAME = 2, GET_ADVANCED_COLOR_INFO = 9, SET_ADVANCED_COLOR_STATE = 10, GET_ADVANCED_COLOR_INFO_2 = 15, SET_HDR_STATE = 16;
+
+        class Target { public long Luid; public uint Id; public string Name; public bool Supported, On, Newer; }
+
+        static void Fill(IntPtr packet, int type, int size, long luid, uint id)
+        {
+            for (int i = 0; i < size; i += 4) Marshal.WriteInt32(packet, i, 0);
+            Marshal.WriteInt32(packet, 0, type);
+            Marshal.WriteInt32(packet, 4, size);
+            Marshal.WriteInt64(packet, 8, luid);
+            Marshal.WriteInt32(packet, 16, (int)id);
+        }
+
+        static List<Target> Targets()
+        {
+            var list = new List<Target>();
+            const int PathSize = 72, ModeSize = 64;
+            uint np, nm;
+            if (GetDisplayConfigBufferSizes(2 /* QDC_ONLY_ACTIVE_PATHS */, out np, out nm) != 0 || np == 0) return list;
+            IntPtr paths = Marshal.AllocHGlobal((int)np * PathSize), modes = Marshal.AllocHGlobal((int)nm * ModeSize), pkt = Marshal.AllocHGlobal(420);
+            try
+            {
+                if (QueryDisplayConfig(2, ref np, paths, ref nm, modes, IntPtr.Zero) != 0) return list;
+                for (int i = 0; i < np; i++)
+                {
+                    IntPtr p = paths + i * PathSize;
+                    // The target (monitor): adapter LUID at +20, id at +28.
+                    var t = new Target { Luid = Marshal.ReadInt64(p, 20), Id = (uint)Marshal.ReadInt32(p, 28) };
+                    Fill(pkt, GET_TARGET_NAME, 420, t.Luid, t.Id);
+                    if (DisplayConfigGetDeviceInfo(pkt) == 0) t.Name = Marshal.PtrToStringUni(pkt + 36);
+                    Fill(pkt, GET_ADVANCED_COLOR_INFO_2, 36, t.Luid, t.Id);
+                    if (DisplayConfigGetDeviceInfo(pkt) == 0)
+                    {
+                        var v = Marshal.ReadInt32(pkt, 20);
+                        t.Newer = true;
+                        t.Supported = (v & 0x10) != 0; // highDynamicRangeSupported
+                        t.On = (v & 0x20) != 0;        // highDynamicRangeUserEnabled
+                    }
+                    else
+                    {
+                        Fill(pkt, GET_ADVANCED_COLOR_INFO, 32, t.Luid, t.Id);
+                        if (DisplayConfigGetDeviceInfo(pkt) != 0) continue;
+                        var v = Marshal.ReadInt32(pkt, 20);
+                        t.Supported = (v & 0x1) != 0 && (v & 0x8) == 0; // supported, not forced off
+                        t.On = (v & 0x2) != 0;
+                    }
+                    list.Add(t);
+                }
+            }
+            catch { }
+            finally
+            {
+                Marshal.FreeHGlobal(paths);
+                Marshal.FreeHGlobal(modes);
+                Marshal.FreeHGlobal(pkt);
+            }
+            return list;
+        }
+
+        public static object Get()
+        {
+            return Targets().Select(t => new Dictionary<string, object> { { "name", t.Name ?? "" }, { "supported", t.Supported }, { "on", t.On } }).ToList();
+        }
+
+        /// <summary>HDR on or off: one display (index into Get()), or every one that has it (-1). Returns how many were set.</summary>
+        public static int Set(bool on, int index)
+        {
+            var all = Targets();
+            int n = 0;
+            IntPtr pkt = Marshal.AllocHGlobal(24);
+            try
+            {
+                for (int i = 0; i < all.Count; i++)
+                {
+                    var t = all[i];
+                    if ((index >= 0 && i != index) || !t.Supported || t.On == on) continue;
+                    Fill(pkt, t.Newer ? SET_HDR_STATE : SET_ADVANCED_COLOR_STATE, 24, t.Luid, t.Id);
+                    Marshal.WriteInt32(pkt, 20, on ? 1 : 0);
+                    if (DisplayConfigSetDeviceInfo(pkt) == 0) n++;
+                }
+            }
+            finally { Marshal.FreeHGlobal(pkt); }
+            return n;
+        }
+    }
+
     static class NightLight
     {
         const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Current\default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
@@ -1250,6 +1351,14 @@ namespace PS5GameLauncher
         /// <summary>Keep the Create button from games (it opens the launcher's capture menu).</summary>
         public static volatile bool StripCreate;
         static readonly object Gate = new object();
+        /// <summary>
+        /// Held while virtual pads are made or removed (and the USB bus with them):
+        /// libVIIPER aborts the whole process (a "STATUS_WAIT_2" box) on a fatal
+        /// error, so a device is never removed while it is still being made, or
+        /// after its bus is gone. Taken before Gate, never inside it.
+        /// </summary>
+        static readonly object Change = new object();
+        static volatile bool shuttingDown;
         static readonly Dictionary<string, Virtual> Pads = new Dictionary<string, Virtual>();
         static readonly HashSet<string> Hidden = new HashSet<string>();
         static string hidhide = "unknown"; // ok | missing | denied | error
@@ -1507,8 +1616,13 @@ namespace PS5GameLauncher
         static class Lib
         {
             const string Dll = "libVIIPER.dll";
-            /// <summary>Loopback only; a standalone VIIPER keeps the default 3241.</summary>
-            public const string Addr = "127.0.0.1:3245";
+            /// <summary>
+            /// Loopback only; a standalone VIIPER keeps the default 3241. libVIIPER
+            /// has usbip-win2 connect to "localhost", which Windows tries as ::1
+            /// first: with the server on 127.0.0.1 only, that refused attempt cost
+            /// 2 s on every virtual controller (Windows retries a refused connect).
+            /// </summary>
+            public static readonly string[] Addrs = { "[::1]:3245", "127.0.0.1:3245" };
 
             [StructLayout(LayoutKind.Sequential)]
             public struct ServerConfig
@@ -1670,10 +1784,14 @@ namespace PS5GameLauncher
                     // millisecond) spread over every core cost twice the CPU in thread
                     // wake-ups (measured 2026-10-18).
                     if (Environment.GetEnvironmentVariable("GOMAXPROCS") == null) Environment.SetEnvironmentVariable("GOMAXPROCS", "2");
-                    var config = new Lib.ServerConfig { Addr = Lib.Addr, ConnectionTimeoutMs = 30000, DeviceConnectTimeoutMs = 5000, FlushIntervalMs = 1 };
-                    UIntPtr s;
-                    if (!Lib.NewUSBServer(ref config, out s, LibLog)) throw new InvalidOperationException(LibFailure("libVIIPER couldn't start its USB/IP server"));
-                    server = s;
+                    foreach (var addr in Lib.Addrs)
+                    {
+                        // IPv6 can be switched off; then localhost is 127.0.0.1 only.
+                        var config = new Lib.ServerConfig { Addr = addr, ConnectionTimeoutMs = 30000, DeviceConnectTimeoutMs = 5000, FlushIntervalMs = 1 };
+                        UIntPtr s;
+                        if (Lib.NewUSBServer(ref config, out s, LibLog)) { server = s; break; }
+                    }
+                    if (server == UIntPtr.Zero) throw new InvalidOperationException(LibFailure("libVIIPER couldn't start its USB/IP server"));
                 }
                 uint bus = 0;
                 if (!Lib.CreateUSBBus(server, ref bus)) throw new InvalidOperationException(LibFailure("libVIIPER couldn't create a USB bus"));
@@ -1722,6 +1840,7 @@ namespace PS5GameLauncher
             public byte[] LastOut;   // last rumble / lights from a DualShock 4 / Xbox pad
             public PadWriter Out;
             public BluetoothHaptics Haptics; // over Bluetooth: the game's HD haptics
+            public BluetoothSpeaker Speaker; // over Bluetooth: the game's controller-speaker sound
             public WiredOutput Sound;        // over USB: the game's controller audio on the pad's own audio device
             public int FullAsks;     // calibration reads tried (Bluetooth: switches to full reports)
             public int LastFullAsk;
@@ -1817,10 +1936,20 @@ namespace PS5GameLauncher
             if (v.Bluetooth)
             {
                 v.Haptics = new BluetoothHaptics(v.Out);
+                v.Speaker = NewSpeaker(v);
                 v.OnHaptics = (h, pcm, length) => v.Haptics.Push(pcm, (int)length);
-                v.OnReset = h => v.Haptics.Reset();
+                v.OnReset = h =>
+                {
+                    v.Haptics.Reset();
+                    if (v.Speaker != null) v.Speaker.Reset();
+                };
                 Lib.SetDualSenseRealtimeHapticsCallback(v.Dev, v.OnHaptics);
                 Lib.SetDualSenseSpeakerResetCallback(v.Dev, v.OnReset);
+                if (v.Speaker != null)
+                {
+                    v.OnAudio = (h, pcm, length) => v.Speaker.Push(pcm, (int)length);
+                    Lib.SetDualSenseAudioOutCallback(v.Dev, v.OnAudio);
+                }
             }
             else
             {
@@ -1857,6 +1986,7 @@ namespace PS5GameLauncher
             }
             catch { }
             if (v.Sound != null) v.Sound.Dispose();
+            if (v.Speaker != null) v.Speaker.Dispose();
             if (v.Out != null) v.Out.Dispose();
             if (v.Kind == "xbox360") XInputForgetVirtual(v.DevId);
         }
@@ -2295,29 +2425,23 @@ namespace PS5GameLauncher
             try
             {
                 HideXboxDevices();
-                var v = new Virtual { Path = "xinput:" + slot, Kind = "xbox360", XSlot = slot };
-                XInputExpectVirtual();
-                UIntPtr dev;
-                if (!Lib.CreateXbox360Device(server, out dev, (uint)busId, true, 0, 0, 0))
+                lock (Change)
                 {
-                    lastError = LibFailure("libVIIPER couldn't add the virtual controller");
-                    Notify();
-                    return;
-                }
-                v.Dev = dev;
-                v.DevId = dev.ToString();
-                v.OnRumble = (h, left, right) => Pad.XInputRumble(slot, left, right);
-                Lib.SetXbox360RumbleCallback(dev, v.OnRumble);
-                bool keep;
-                lock (Gate)
-                {
-                    keep = Enabled;
-                    if (keep) XboxPads[slot] = v;
-                }
-                if (!keep)
-                {
-                    Destroy(v);
-                    return;
+                    if (!Enabled || busId < 0) return;
+                    var v = new Virtual { Path = "xinput:" + slot, Kind = "xbox360", XSlot = slot };
+                    XInputExpectVirtual();
+                    UIntPtr dev;
+                    if (!Lib.CreateXbox360Device(server, out dev, (uint)busId, true, 0, 0, 0))
+                    {
+                        lastError = LibFailure("libVIIPER couldn't add the virtual controller");
+                        Notify();
+                        return;
+                    }
+                    v.Dev = dev;
+                    v.DevId = dev.ToString();
+                    v.OnRumble = (h, left, right) => Pad.XInputRumble(slot, left, right);
+                    Lib.SetXbox360RumbleCallback(dev, v.OnRumble);
+                    lock (Gate) XboxPads[slot] = v;
                 }
                 Notify();
                 // Its XInput slot shows up shortly: the next pad waits for it.
@@ -2344,7 +2468,7 @@ namespace PS5GameLauncher
             }
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                Destroy(v);
+                lock (Change) Destroy(v);
                 Notify();
             });
         }
@@ -2377,8 +2501,13 @@ namespace PS5GameLauncher
             Hide(path);
             try
             {
-                var v = Create(path, pid);
-                lock (Gate) Pads[path] = v;
+                lock (Change)
+                {
+                    if (!Enabled || busId < 0) return;
+                    lock (Gate) if (Pads.ContainsKey(path)) return;
+                    var v = Create(path, pid);
+                    lock (Gate) Pads[path] = v;
+                }
                 Notify();
             }
             catch (Exception e)
@@ -2396,7 +2525,7 @@ namespace PS5GameLauncher
                 if (!Pads.TryGetValue(path, out v)) return;
                 Pads.Remove(path);
             }
-            Destroy(v);
+            lock (Change) Destroy(v);
             Notify();
         }
 
@@ -2460,6 +2589,7 @@ namespace PS5GameLauncher
         static void GameOutput(Virtual v, byte[] p)
         {
             Interlocked.Increment(ref v.GameOutputs);
+            if (v.Speaker != null) v.Speaker.Observe(p);
             bool rumble = (p[0] & 0x01) != 0 || (p[38] & 0x04) != 0;
             p[0] &= 0xFC;
             p[38] &= 0xFB;
@@ -2474,11 +2604,11 @@ namespace PS5GameLauncher
 
         /// <summary>
         /// Writes to one real DualSense on its own thread: output state (report 0x02
-        /// over USB, 0x31 over Bluetooth) and, over Bluetooth, HD haptics (0x32). A
-        /// Bluetooth link takes one small packet about every 10.5 ms (measured
-        /// 2026-10: 0x31 at most ~95 a second, 0x32 at most ~47), so states that pile
-        /// up are merged into one and go first, and haptics are kept to two reports so
-        /// they never fall behind the game.
+        /// over USB, 0x31 over Bluetooth) and, over Bluetooth, HD haptics (0x32). The
+        /// Bluetooth link depends on the adapter (measured 2026-10: a Barrot one took
+        /// 0x31 ~95 a second and 0x32 ~47, a Realtek one ~680 and ~380), so states that
+        /// pile up are merged into one and go first, and haptics are kept to two
+        /// reports so they never fall behind the game.
         /// </summary>
         internal sealed class PadWriter : IDisposable
         {
@@ -2490,8 +2620,9 @@ namespace PS5GameLauncher
             readonly Queue<byte[]> haptics = new Queue<byte[]>();
             byte[] state, sent;
             byte seq;
+            bool held; // BluetoothSpeaker has the pad: it writes, this doesn't
             volatile bool stop;
-            public int States, Haptics, Failed; // written (status, for diagnostics)
+            public int States, Haptics, Speaker, Failed; // written (status, for diagnostics)
 
             public PadWriter(string path, bool bluetooth)
             {
@@ -2514,10 +2645,56 @@ namespace PS5GameLauncher
             {
                 lock (gate)
                 {
+                    if (held) return; // the speaker stream carries the haptics now
                     haptics.Enqueue(report);
                     while (haptics.Count > 2) haptics.Dequeue();
                 }
                 wake.Set();
+            }
+
+            /// <summary>
+            /// While the pad plays speaker sound over Bluetooth it only takes report 0x36
+            /// (BluetoothSpeaker): output states wait here for it (TakeState) and haptics
+            /// are dropped. Released, what's waiting goes as 0x31 again.
+            /// </summary>
+            public void Hold(bool on)
+            {
+                lock (gate)
+                {
+                    held = on;
+                    haptics.Clear();
+                }
+                wake.Set();
+            }
+
+            /// <summary>The output state waiting to be sent (merged), if it changes anything; a copy.</summary>
+            public byte[] TakeState()
+            {
+                lock (gate)
+                {
+                    var p = state;
+                    state = null;
+                    if (p == null || (sent != null && p.SequenceEqual(sent))) return null;
+                    sent = p;
+                    return (byte[])p.Clone();
+                }
+            }
+
+            /// <summary>An output state as this pad's report (0x31 over Bluetooth), in its sequence.</summary>
+            public byte[] StateReport(byte[] p)
+            {
+                lock (gate) return Report(p);
+            }
+
+            /// <summary>Writes a report now, on the caller's thread (BluetoothSpeaker's).</summary>
+            public void Write(byte[] r)
+            {
+                if (stop || handle.IsInvalid) return;
+                int written;
+                if (!WriteFile(handle, r, r.Length, out written, IntPtr.Zero)) Failed++;
+                else if (r[0] == 0x36) Speaker++;
+                else if (r[0] == 0x32) Haptics++;
+                else States++;
             }
 
             // Output state fields by the valid flag that makes the pad use them: [flag byte, bit, first, count].
@@ -2572,6 +2749,7 @@ namespace PS5GameLauncher
                         byte[] r;
                         lock (gate)
                         {
+                            if (held) break;
                             if (state != null)
                             {
                                 var p = state;
@@ -2605,17 +2783,17 @@ namespace PS5GameLauncher
         /// A game's HD haptics (the virtual DualSense's rear voice-coil pair from
         /// libVIIPER's realtime haptics lane: 2 channels, 16-bit, 48 kHz) as Bluetooth
         /// report 0x32 in DualSense Client's layout: 32 stereo frames of 8-bit samples.
-        /// A Bluetooth link here takes one 0x32 about every 21 ms, so each covers
-        /// 21.3 ms (32 frames of 48 kHz averaged into one: 1.5 kHz per actuator).
+        /// Each covers 10.7 ms (16 frames of 48 kHz averaged into one: 3 kHz per
+        /// actuator, the pad's own rate), about 94 reports a second.
         /// </summary>
         internal sealed class BluetoothHaptics
         {
-            const int Factor = 32;
+            const int Factor = 16;
             readonly PadWriter writer;
             readonly object gate = new object();
             readonly byte[] frames = new byte[64];
             byte[] pcm = new byte[0];
-            int filled, n, sumLeft, sumRight, quiet;
+            int filled, n, sumLeft, sumRight;
             byte seq, counter;
 
             public BluetoothHaptics(PadWriter writer) { this.writer = writer; }
@@ -2650,11 +2828,9 @@ namespace PS5GameLauncher
 
             void Send()
             {
-                // Silence: a couple of reports to settle the actuators, then nothing (leaves the link to the triggers).
-                bool silent = true;
-                for (int i = 0; i < frames.Length && silent; i++) silent = frames[i] == 0;
-                quiet = silent ? quiet + 1 : 0;
-                if (quiet > 2) return;
+                // Silence is sent too, for as long as the game streams: with gaps the pad's haptics go
+                // idle, and short taps (a menu's clicks) then come out wrong. The pad still takes
+                // output states in between (checked 2026-10-19: its echoed host timestamp keeps up).
                 var r = new byte[writer.Length];
                 r[0] = 0x32;
                 r[1] = (byte)(seq << 4);
@@ -2669,6 +2845,447 @@ namespace PS5GameLauncher
                 crc = ~Crc32(r, 0, 138, crc);
                 r[138] = (byte)crc; r[139] = (byte)(crc >> 8); r[140] = (byte)(crc >> 16); r[141] = (byte)(crc >> 24);
                 writer.PostHaptics(r);
+            }
+        }
+
+        static string speakerError;
+
+        /// <summary>A Bluetooth DualSense's speaker stream, or null without an Opus encoder (Concentus.dll).</summary>
+        static BluetoothSpeaker NewSpeaker(Virtual v)
+        {
+            try
+            {
+                return new BluetoothSpeaker(v.Out, NewOpus(), v.VibrationV2);
+            }
+            catch (Exception e)
+            {
+                speakerError = "no speaker: " + e.Message;
+                return null;
+            }
+        }
+
+        // Its own method: without Concentus.dll it is this call that fails, not its caller.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static OpusFrameEncoder NewOpus() { return new OpusFrameEncoder(); }
+
+        /// <summary>A Bluetooth report's CRC (seeded with 0xA2) over its first len bytes, written after them.</summary>
+        static void PutCrc(byte[] r, int len)
+        {
+            var crc = Crc32(new byte[] { 0xA2 }, 0, 1, 0xFFFFFFFF);
+            crc = ~Crc32(r, 0, len, crc);
+            r[len] = (byte)crc; r[len + 1] = (byte)(crc >> 8); r[len + 2] = (byte)(crc >> 16); r[len + 3] = (byte)(crc >> 24);
+        }
+
+        /// <summary>
+        /// The game's controller-speaker sound (the virtual DualSense's front pair on
+        /// its audio interface: 4 channels, 16-bit, 48 kHz) on a Bluetooth pad's own
+        /// speaker. Over Bluetooth the pad takes it as Opus, 200 bytes per frame, in
+        /// report 0x36: one every 512 frames (10.67 ms), the haptics (the rear pair)
+        /// and the output state in the same report. While that stream runs the pad
+        /// ignores 0x31 and 0x32, and its rumble motors (rumble is played on the
+        /// haptics instead). It opens when the speaker has something to play (report
+        /// 0x32 "primes" the pad, a few silent reports warm it up) and closes after a
+        /// while of silence, when 0x31 / 0x32 take over again. As in DualSense Client.
+        /// The speaker's volume, output path and preamp are the game's own (what a
+        /// wired pad gets from it), DualSense Client's defaults until the game sets
+        /// them. What happens goes to %LOCALAPPDATA%\PS5 Game Launcher\speaker.log.
+        /// </summary>
+        internal sealed class BluetoothSpeaker : IDisposable
+        {
+            const int Frames = 512;     // per report: 10.67 ms
+            const int Preroll = 8;      // silent reports after the prime
+            const int Target = 3;       // blocks waiting (~32 ms); with more, some are skipped
+            const int MaxBlocks = 32;
+            const int Hangover = 940;   // ~10 s of silence and the stream closes
+            const byte Volume = 0x50;   // the pad's speaker volume (0-255) until the game sets one
+            const int Length = 398;     // report 0x36 without the padding Windows wants
+
+            sealed class Block
+            {
+                public readonly short[] Sound = new short[480 * 2]; // 512 frames as 480, for Opus
+                public readonly byte[] Haptics = new byte[64];       // 32 frames, 3 kHz, 8-bit stereo
+                public bool Silent;
+            }
+
+            static readonly Block Quiet = new Block { Silent = true };
+            static readonly double Period = System.Diagnostics.Stopwatch.Frequency * (double)Frames / 48000;
+
+            [DllImport("winmm.dll")] static extern int timeBeginPeriod(int ms);
+            [DllImport("winmm.dll")] static extern int timeEndPeriod(int ms);
+
+            readonly PadWriter writer;
+            readonly OpusFrameEncoder opus;
+            readonly bool vibrationV2;
+            readonly object gate = new object();
+            readonly Queue<Block> blocks = new Queue<Block>();
+            readonly AutoResetEvent wake = new AutoResetEvent(false);
+            readonly short[] frames = new short[Frames * 4];
+            readonly byte[] report;
+            int filled;
+            byte[] pcm = new byte[0];
+            volatile bool open, stop;
+            byte seq, counter;
+            byte rumbleSmall, rumbleLarge;
+            double magSmall, magLarge, phaseSmall, phaseLarge;
+            public int Opened, Skipped, Errors; // status, for diagnostics
+            string error;
+            // The game's audio settings (-1: not set yet): headphone and speaker volume, audio control (output path), audio control 2 (preamp).
+            volatile int gameHeadphones = -1, gameVolume = -1, gameControl = -1, gameControl2 = -1;
+            string loggedSettings;
+            // Diagnostics: the loudest front (speaker) and rear (haptics) sample of the last second.
+            int peakFront, peakRear, transfers, peakAt = Environment.TickCount;
+            readonly System.Collections.Concurrent.ConcurrentQueue<string> log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+
+            public BluetoothSpeaker(PadWriter writer, OpusFrameEncoder opus, bool vibrationV2)
+            {
+                this.writer = writer;
+                this.opus = opus;
+                this.vibrationV2 = vibrationV2;
+                report = new byte[Math.Max(writer.Length, Length)];
+                new Thread(Run) { IsBackground = true, Name = "pad-speaker", Priority = ThreadPriority.AboveNormal }.Start();
+            }
+
+            public string Describe()
+            {
+                return "bluetooth speaker " + (open ? "playing" : "idle") + ", opened " + Opened + ", skipped " + Skipped
+                    + (error != null ? ", error: " + error : "");
+            }
+
+            /// <summary>An output state the game sent (on libVIIPER's thread): its audio settings are kept.</summary>
+            public void Observe(byte[] p)
+            {
+                if ((p[0] & 0x10) != 0) gameHeadphones = p[4];
+                if ((p[0] & 0x20) != 0) gameVolume = p[5];
+                if ((p[0] & 0x80) != 0) gameControl = p[7];
+                if ((p[1] & 0x80) != 0) gameControl2 = p[37];
+                var now = string.Format("game audio: speaker volume {0}, headphone volume {1}, audio control {2}, audio control 2 {3}",
+                    Hex(gameVolume), Hex(gameHeadphones), Hex(gameControl), Hex(gameControl2));
+                if (now != loggedSettings)
+                {
+                    loggedSettings = now;
+                    Log(now);
+                }
+            }
+
+            static string Hex(int v) { return v < 0 ? "unset" : "0x" + v.ToString("X2"); }
+
+            void Log(string line) { log.Enqueue(DateTime.Now.ToString("HH:mm:ss.fff") + " " + line); }
+
+            /// <summary>Writes what was logged (on this stream's thread, never libVIIPER's).</summary>
+            void FlushLog()
+            {
+                if (log.IsEmpty) return;
+                try
+                {
+                    var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PS5 Game Launcher");
+                    var file = Path.Combine(dir, "speaker.log");
+                    Directory.CreateDirectory(dir);
+                    var info = new FileInfo(file);
+                    if (info.Exists && info.Length > 256 * 1024) info.Delete();
+                    var text = new StringBuilder();
+                    string line;
+                    while (log.TryDequeue(out line)) text.Append(line).Append(Environment.NewLine);
+                    File.AppendAllText(file, text.ToString());
+                }
+                catch { }
+            }
+
+            /// <summary>Called on libVIIPER's thread with the PCM of one USB transfer.</summary>
+            public void Push(IntPtr data, int length)
+            {
+                lock (gate)
+                {
+                    if (pcm.Length < length) pcm = new byte[length];
+                    Marshal.Copy(data, pcm, 0, length);
+                    transfers++;
+                    for (int i = 0; i + 7 < length; i += 8)
+                    {
+                        for (int c = 0; c < 4; c++) frames[filled * 4 + c] = (short)(pcm[i + c * 2] | pcm[i + c * 2 + 1] << 8);
+                        peakFront = Math.Max(peakFront, Math.Max(Math.Abs((int)frames[filled * 4]), Math.Abs((int)frames[filled * 4 + 1])));
+                        peakRear = Math.Max(peakRear, Math.Max(Math.Abs((int)frames[filled * 4 + 2]), Math.Abs((int)frames[filled * 4 + 3])));
+                        if (++filled < Frames) continue;
+                        filled = 0;
+                        var b = MakeBlock();
+                        if (b == null) continue; // nothing to play: the pad stays as it is
+                        blocks.Enqueue(b);
+                        while (blocks.Count > MaxBlocks)
+                        {
+                            blocks.Dequeue();
+                            Skipped++;
+                        }
+                        wake.Set();
+                    }
+                    if (Environment.TickCount - peakAt >= 1000)
+                    {
+                        // Once a second while the game streams: only when there was sound, or a stream is open.
+                        if (peakFront > 16 || open)
+                            Log(string.Format("audio from the game: {0} transfers of {1} bytes, loudest speaker sample {2}, loudest haptics sample {3}{4}",
+                                transfers, length, peakFront, peakRear, open ? " (stream open)" : ""));
+                        peakFront = peakRear = transfers = 0;
+                        peakAt = Environment.TickCount;
+                    }
+                }
+            }
+
+            /// <summary>The game opened, closed or reset the audio stream: start over.</summary>
+            public void Reset()
+            {
+                lock (gate)
+                {
+                    filled = 0;
+                    blocks.Clear();
+                }
+                Log("the game reset its audio stream");
+            }
+
+            /// <summary>The 512 frames gathered, for a report; null when silent and no stream is open.</summary>
+            Block MakeBlock()
+            {
+                int peak = 0;
+                for (int f = 0; f < Frames; f++)
+                {
+                    peak = Math.Max(peak, Math.Abs((int)frames[f * 4]));
+                    peak = Math.Max(peak, Math.Abs((int)frames[f * 4 + 1]));
+                }
+                if (peak <= 16 && !open) return null;
+                var b = new Block { Silent = peak <= 16 };
+                // The pad plays one 480-sample Opus frame per report: 512 frames into 480 (linear).
+                const double step = (Frames - 1) / 479.0;
+                for (int i = 0; i < 480; i++)
+                {
+                    double x = i * step;
+                    int k = (int)x, k2 = Math.Min(k + 1, Frames - 1);
+                    double t = x - k;
+                    for (int c = 0; c < 2; c++)
+                        b.Sound[i * 2 + c] = (short)(frames[k * 4 + c] + (frames[k2 * 4 + c] - frames[k * 4 + c]) * t);
+                }
+                // The haptics, as BluetoothHaptics makes them: 16 frames averaged into one, 8-bit.
+                for (int i = 0; i < 32; i++)
+                {
+                    int l = 0, r = 0;
+                    for (int f = i * 16; f < i * 16 + 16; f++)
+                    {
+                        l += frames[f * 4 + 2];
+                        r += frames[f * 4 + 3];
+                    }
+                    b.Haptics[i * 2] = (byte)(sbyte)(l / 16 >> 8);
+                    b.Haptics[i * 2 + 1] = (byte)(sbyte)(r / 16 >> 8);
+                }
+                return b;
+            }
+
+            void Run()
+            {
+                while (!stop)
+                {
+                    FlushLog();
+                    bool any;
+                    lock (gate) any = blocks.Count > 0;
+                    if (!any)
+                    {
+                        wake.WaitOne(200);
+                        continue;
+                    }
+                    timeBeginPeriod(1);
+                    try
+                    {
+                        Stream();
+                    }
+                    catch (Exception e)
+                    {
+                        Errors++;
+                        error = e.Message;
+                    }
+                    finally
+                    {
+                        timeEndPeriod(1);
+                        Close();
+                        Log("stream closed (blocks skipped so far: " + Skipped + (error != null ? ", error: " + error : "") + ")");
+                    }
+                }
+            }
+
+            /// <summary>One stream: prime, warm up, then a report every 10.67 ms until it has been quiet a while.</summary>
+            void Stream()
+            {
+                Prime();
+                double due = System.Diagnostics.Stopwatch.GetTimestamp();
+                for (int i = 0; i < Preroll && !stop; i++)
+                {
+                    Send(Quiet);
+                    due += Period;
+                    WaitUntil(due);
+                }
+                int quiet = 0, tick = 0, sent = 0;
+                while (!stop)
+                {
+                    Block b = null;
+                    lock (gate)
+                    {
+                        if (blocks.Count > 0) b = blocks.Dequeue();
+                        // Behind (after the prime, or a hiccup): skip silence, else a block now and then.
+                        while (blocks.Count > Target && blocks.Peek().Silent)
+                        {
+                            blocks.Dequeue();
+                            Skipped++;
+                        }
+                        if (blocks.Count > Target + 1 && ++tick % 8 == 0)
+                        {
+                            blocks.Dequeue();
+                            Skipped++;
+                        }
+                    }
+                    if (b == null) b = Quiet;
+                    if (++sent % 94 == 0) FlushLog();
+                    quiet = b.Silent ? quiet + 1 : 0;
+                    if (quiet > Hangover) return;
+                    Send(b);
+                    // Paced against the clock, not the last report; late, it starts over from now (no burst).
+                    due = Math.Max(due + Period, System.Diagnostics.Stopwatch.GetTimestamp());
+                    WaitUntil(due);
+                }
+            }
+
+            static void WaitUntil(double due)
+            {
+                while (true)
+                {
+                    var left = (due - System.Diagnostics.Stopwatch.GetTimestamp()) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    if (left <= 0.3) return;
+                    Thread.Sleep(left > 2 ? (int)left - 1 : 1);
+                }
+            }
+
+            void Prime()
+            {
+                open = true;
+                writer.Hold(true);
+                seq = counter = 0;
+                opus.Reset();
+                magSmall = magLarge = 0;
+                var s = State();
+                // The speaker path and volume, then report 0x32 opens the stream (with the same state).
+                writer.Write(writer.StateReport(s));
+                var r = new byte[Math.Max(writer.Length, 142)];
+                r[0] = 0x32;
+                r[1] = 0x10;
+                r[2] = 0x90; r[3] = 0x3F; // packet 0x10 (sized, 63 bytes): output state
+                Array.Copy(s, 0, r, 4, s.Length);
+                PutCrc(r, 138);
+                writer.Write(r);
+                Opened++;
+                Log(string.Format("stream opened: speaker volume 0x{0:X2}, audio control 0x{1:X2}, audio control 2 0x{2:X2}, route 0x{3:X2}{4}",
+                    s[5], s[7], s[37], Route(), gameControl < 0 ? " (defaults: the game set no path)" : ""));
+            }
+
+            /// <summary>The Opus lane: the headset's when the path is headphones only, else the speaker's.</summary>
+            byte Route()
+            {
+                var control = gameControl >= 0 ? gameControl : 0x30;
+                return (byte)((control & 0x30) == 0 ? 0x96 : 0x93);
+            }
+
+            void Close()
+            {
+                open = false;
+                lock (gate) blocks.Clear();
+                // Rumble that is still on goes back to the motors.
+                if (rumbleSmall != 0 || rumbleLarge != 0)
+                {
+                    var p = new byte[47];
+                    p[0] = 0x02;
+                    if (vibrationV2) p[38] = 0x04;
+                    else p[0] |= 0x01;
+                    p[2] = rumbleSmall;
+                    p[3] = rumbleLarge;
+                    writer.Post(p);
+                }
+                writer.Hold(false);
+            }
+
+            /// <summary>The game's output state waiting (if any), with the speaker's audio settings.</summary>
+            byte[] State()
+            {
+                var p = writer.TakeState() ?? new byte[47];
+                // The pad ignores its motors now: rumble is played on the haptics (Mix).
+                if ((p[0] & 0x03) != 0 || (p[38] & 0x04) != 0)
+                {
+                    rumbleSmall = p[2];
+                    rumbleLarge = p[3];
+                }
+                p[0] &= 0xFC;
+                p[38] &= 0xFB;
+                p[2] = p[3] = 0;
+                p[0] |= 0x10 | 0x20 | 0x80; // headphone volume, speaker volume, audio control
+                p[1] |= 0x80;               // audio control 2
+                // The game's own settings (a wired pad gets them from it), else: the speaker, at Volume.
+                p[4] = (byte)(gameHeadphones >= 0 ? gameHeadphones : 0x3F);
+                p[5] = (byte)(gameVolume >= 0 ? gameVolume : Volume);
+                p[7] = (byte)(gameControl >= 0 ? gameControl : 0x30);
+                p[37] = (byte)(gameControl2 >= 0 ? gameControl2 : 0x02);
+                return p;
+            }
+
+            void Send(Block b)
+            {
+                var r = report;
+                r[0] = 0x36;
+                r[1] = (byte)(seq << 4);
+                seq = (byte)((seq + 1) & 0x0F);
+                r[2] = 0x91; r[3] = 0x07; // packet 0x11 (sized, 7 bytes): mic off, buffer lengths
+                r[4] = 0xFE;
+                r[5] = r[6] = r[7] = r[8] = r[9] = 0x40;
+                r[10] = counter++;
+                r[11] = 0x90; r[12] = 0x3F; // packet 0x10 (sized, 63 bytes): output state
+                Array.Copy(State(), 0, r, 13, 47);
+                r[76] = 0x92; r[77] = 0x40; // packet 0x12 (sized, 64 bytes): haptics
+                Array.Copy(b.Haptics, 0, r, 78, 64);
+                Mix(r, 78);
+                r[142] = Route(); r[143] = OpusFrameEncoder.Bytes; // packet 0x13 / 0x16 (sized): the speaker's / headset's Opus frame
+                // The speaker plays the right channel only (path 0x30): without the game's own path, both sides go to it.
+                if (gameControl < 0 && !b.Silent) Mono(b.Sound);
+                if (!opus.Encode(b.Sound, r, 144)) throw new InvalidOperationException("Opus frame of the wrong size");
+                PutCrc(r, Length - 4);
+                writer.Write(r);
+            }
+
+            static void Mono(short[] sound)
+            {
+                for (int i = 0; i + 1 < sound.Length; i += 2)
+                {
+                    var m = (short)((sound[i] + sound[i + 1]) / 2);
+                    sound[i] = sound[i + 1] = m;
+                }
+            }
+
+            /// <summary>
+            /// The game's rumble on the haptics, as DualSense Client plays it: the strong
+            /// motor as 60 Hz, the weak one as 180 Hz, eased over about 50 ms.
+            /// </summary>
+            void Mix(byte[] r, int at)
+            {
+                const double rate = 3000;
+                double ease = 1 - Math.Exp(-1 / (0.05 * rate));
+                for (int i = 0; i < 32; i++)
+                {
+                    magLarge += (rumbleLarge / 255.0 - magLarge) * ease;
+                    magSmall += (rumbleSmall / 255.0 - magSmall) * ease;
+                    phaseLarge = (phaseLarge + 60 / rate) % 1;
+                    phaseSmall = (phaseSmall + 180 / rate) % 1;
+                    if (magLarge < 0.002 && magSmall < 0.002) continue;
+                    int w = (int)Math.Round((magLarge * Math.Sin(2 * Math.PI * phaseLarge) + magSmall * Math.Sin(2 * Math.PI * phaseSmall)) * 127);
+                    for (int c = 0; c < 2; c++)
+                    {
+                        int v = (sbyte)r[at + i * 2 + c] + w;
+                        r[at + i * 2 + c] = (byte)(sbyte)Math.Max(-128, Math.Min(127, v));
+                    }
+                }
+            }
+
+            public void Dispose()
+            {
+                stop = true;
+                wake.Set();
             }
         }
 
@@ -2699,8 +3316,8 @@ namespace PS5GameLauncher
                     { "pads", Pads.Values.Select(p => new Dictionary<string, object>
                         {
                             { "kind", p.Kind }, { "bluetooth", p.Bluetooth }, { "gameOutputs", p.GameOutputs },
-                            { "states", p.Out.States }, { "haptics", p.Out.Haptics }, { "failed", p.Out.Failed },
-                            { "sound", p.Sound != null ? p.Sound.Describe() : null },
+                            { "states", p.Out.States }, { "haptics", p.Out.Haptics }, { "speaker", p.Out.Speaker }, { "failed", p.Out.Failed },
+                            { "sound", p.Sound != null ? p.Sound.Describe() : p.Speaker != null ? p.Speaker.Describe() : p.Bluetooth && IsDualSense(p) ? speakerError : null },
                         }).ToArray() },
                 };
             }
@@ -2713,13 +3330,16 @@ namespace PS5GameLauncher
             if (mode == emulation) return Status();
             emulation = mode;
             if (!Enabled) return Status();
-            List<Virtual> rebuild;
-            lock (Gate)
+            lock (Change)
             {
-                rebuild = Pads.Values.ToList();
-                Pads.Clear();
+                List<Virtual> rebuild;
+                lock (Gate)
+                {
+                    rebuild = Pads.Values.ToList();
+                    Pads.Clear();
+                }
+                foreach (var v in rebuild) Destroy(v);
             }
-            foreach (var v in rebuild) Destroy(v);
             foreach (var p in Pad.PlayStationPaths()) OnConnected(p.Key, p.Value);
             Notify();
             return Status();
@@ -2732,41 +3352,58 @@ namespace PS5GameLauncher
                 RemoveRecorded(); // left over from a run that didn't shut down cleanly
                 return Status();
             }
-            if (on == Enabled) return Status();
+            if (on && shuttingDown) return Status();
+            lock (Change)
+            {
+                if (on == Enabled) return Status();
+                if (on)
+                {
+                    lastError = null;
+                    if (!SetupHidHide() || !SetupViiper())
+                    {
+                        UnhideAll();
+                        return Status();
+                    }
+                    Enabled = true;
+                }
+                else Disable();
+            }
             if (on)
             {
-                lastError = null;
-                if (!SetupHidHide() || !SetupViiper())
-                {
-                    UnhideAll();
-                    return Status();
-                }
-                Enabled = true;
                 HideXboxDevices();
                 foreach (var p in Pad.PlayStationPaths()) OnConnected(p.Key, p.Value);
             }
-            else Disable();
             Notify();
             return Status();
         }
 
         public static void Disable()
         {
-            Enabled = false;
-            List<Virtual> all;
-            lock (Gate)
+            lock (Change)
             {
-                all = Pads.Values.ToList();
-                Pads.Clear();
-            }
-            foreach (var v in all) Destroy(v);
-            foreach (var v in TakeXbox()) Destroy(v);
-            if (busId >= 0)
-            {
-                try { Lib.RemoveUSBBus(server, (uint)busId); } catch { }
-                busId = -1;
+                Enabled = false;
+                List<Virtual> all;
+                lock (Gate)
+                {
+                    all = Pads.Values.ToList();
+                    Pads.Clear();
+                }
+                foreach (var v in all) Destroy(v);
+                foreach (var v in TakeXbox()) Destroy(v);
+                if (busId >= 0)
+                {
+                    try { Lib.RemoveUSBBus(server, (uint)busId); } catch { }
+                    busId = -1;
+                }
             }
             UnhideAll();
+        }
+
+        /// <summary>The helper is exiting: off for good (a request still on its way can't turn it back on).</summary>
+        public static void ShutDown()
+        {
+            shuttingDown = true;
+            Disable();
         }
 
         public static object SetMuted(bool m)
@@ -2932,6 +3569,44 @@ namespace PS5GameLauncher
                 }
             }) { IsBackground = true, Name = "keep-default-output" }.Start();
         }
+    }
+
+    /// <summary>
+    /// Opus frames for a DualSense's speaker over Bluetooth, as the pad takes them
+    /// (DualSense Client's settings): 48 kHz stereo, 10 ms (480 samples), a constant
+    /// 160 kbit/s, so always 200 bytes. The encoder is Concentus (a C# port of
+    /// libopus, Concentus.dll next to this helper: scripts/fetch-concentus.js); it is
+    /// only built in when that DLL was there, and without it there's no speaker.
+    /// </summary>
+    sealed class OpusFrameEncoder
+    {
+        public const int Bytes = 200;
+#if OPUS
+        Concentus.Structs.OpusEncoder encoder;
+
+        public OpusFrameEncoder() { Reset(); }
+
+        /// <summary>A fresh encoder: the pad's decoder starts fresh with every stream.</summary>
+        public void Reset()
+        {
+            var e = Concentus.Structs.OpusEncoder.Create(48000, 2, Concentus.Enums.OpusApplication.OPUS_APPLICATION_AUDIO);
+            e.ExpertFrameDuration = Concentus.Enums.OpusFramesize.OPUS_FRAMESIZE_10_MS;
+            e.Bitrate = Bytes * 8 * 100;
+            e.UseVBR = false;
+            e.Complexity = 0;
+            encoder = e;
+        }
+
+        /// <summary>480 stereo frames into dst[at..at + 200).</summary>
+        public bool Encode(short[] pcm, byte[] dst, int at)
+        {
+            return encoder.Encode(pcm, 0, 480, dst, at, Bytes) == Bytes;
+        }
+#else
+        public OpusFrameEncoder() { throw new NotSupportedException("built without Concentus.dll (scripts/fetch-concentus.js)"); }
+        public void Reset() { }
+        public bool Encode(short[] pcm, byte[] dst, int at) { return false; }
+#endif
     }
 
     /// <summary>Plays the game's controller audio on a wired DualSense's own audio device.</summary>
@@ -3230,6 +3905,71 @@ namespace PS5GameLauncher
             if (xinputSet == null) return;
             var v = new XINPUT_VIBRATION { wLeftMotorSpeed = (ushort)(left * 257), wRightMotorSpeed = (ushort)(right * 257) };
             try { xinputSet((uint)slot, ref v); } catch { }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct HIDD_ATTRIBUTES { public int Size; public ushort VendorID, ProductID, VersionNumber; }
+        [DllImport("hid.dll")] static extern bool HidD_GetAttributes(Microsoft.Win32.SafeHandles.SafeFileHandle h, ref HIDD_ATTRIBUTES a);
+        [DllImport("hid.dll", CharSet = CharSet.Unicode)] static extern bool HidD_GetProductString(Microsoft.Win32.SafeHandles.SafeFileHandle h, StringBuilder buf, int len);
+
+        /// <summary>A HID device's ids and product name (null if it can't be opened).</summary>
+        static Dictionary<string, object> HidIds(string path)
+        {
+            using (var h = CreateFile(path, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero))
+            {
+                if (h.IsInvalid) return null;
+                var a = new HIDD_ATTRIBUTES { Size = Marshal.SizeOf(typeof(HIDD_ATTRIBUTES)) };
+                if (!HidD_GetAttributes(h, ref a)) return null;
+                var name = new StringBuilder(128);
+                HidD_GetProductString(h, name, 256);
+                return new Dictionary<string, object> { { "vid", (int)a.VendorID }, { "pid", (int)a.ProductID }, { "version", (int)a.VersionNumber }, { "product", name.ToString() } };
+            }
+        }
+
+        /// <summary>
+        /// The real controllers, with what SDL (in emulators) builds its device ids
+        /// from: PlayStation pads as read over HID, the rest through XInput. The
+        /// launcher's own virtual pads are left out.
+        /// </summary>
+        public static object Gamepads()
+        {
+            var list = new List<Dictionary<string, object>>();
+            foreach (var kv in PlayStationPaths())
+            {
+                var ids = HidIds(kv.Key);
+                if (ids == null) continue;
+                ids["kind"] = "ps";
+                ids["path"] = kv.Key;
+                ids["bus"] = kv.Key.IndexOf("{00001124", StringComparison.OrdinalIgnoreCase) >= 0 ? "bluetooth" : "usb";
+                ids["mac"] = PadInfo.MacOf(kv.Key);
+                list.Add(ids);
+            }
+            // XInput's own product names, by USB ids (a GIP Xbox pad's HID part says 045E:02FF instead).
+            var names = new Dictionary<string, string>();
+            foreach (var path in HidPaths())
+            {
+                if (path.IndexOf("&ig_", StringComparison.OrdinalIgnoreCase) < 0 || IsVirtual(path)) continue;
+                var ids = HidIds(path);
+                if (ids != null) names[string.Format("{0:x4}:{1:x4}", ids["vid"], ids["pid"])] = (string)ids["product"];
+            }
+            if (xinputCaps != null)
+            {
+                for (var slot = 0; slot < 4; slot++)
+                {
+                    if (Passthrough.IsVirtualSlot(slot)) continue;
+                    XINPUT_CAPABILITIES_EX c;
+                    try { if (xinputCaps(1, (uint)slot, 0, out c) != 0) continue; }
+                    catch { continue; }
+                    string product;
+                    names.TryGetValue(string.Format("{0:x4}:{1:x4}", c.VendorId, c.ProductId), out product);
+                    list.Add(new Dictionary<string, object>
+                    {
+                        { "kind", "xinput" }, { "slot", slot }, { "vid", (int)c.VendorId }, { "pid", (int)c.ProductId },
+                        { "version", (int)c.ProductVersion }, { "subtype", (int)c.SubType }, { "product", product ?? "" },
+                    });
+                }
+            }
+            return list;
         }
 
         /// <summary>USB product id of the controller in an XInput slot (-1: unknown).</summary>
@@ -3775,6 +4515,14 @@ namespace PS5GameLauncher
             var pair = Feature(p.Path, 0x09);
             if (pair != null)
                 p.Mac = string.Join(":", Enumerable.Range(1, 6).Reverse().Select(i => pair[i].ToString("X2")));
+        }
+
+        /// <summary>A DualSense's Bluetooth address (null until read).</summary>
+        public static string MacOf(string path)
+        {
+            Info p;
+            lock (Gate) Pads.TryGetValue(path, out p);
+            return p != null ? p.Mac : null;
         }
 
         public static object List(bool refresh)

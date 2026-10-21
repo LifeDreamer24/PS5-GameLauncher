@@ -8,6 +8,10 @@ main/native/syshelper.exe
 main/native/libVIIPER.dll
 main/native/libVIIPER-licenses.txt
 
+# Concentus (Opus codec, NuGet), fetched by scripts/fetch-concentus.js
+main/native/Concentus.dll
+main/native/Concentus-license.txt
+
 *.log
 .DS_Store
 Thumbs.db

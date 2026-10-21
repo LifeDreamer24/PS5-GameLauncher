@@ -10,6 +10,22 @@ const { EventEmitter } = require('events');
 
 const NATIVE_DIR = path.join(__dirname, 'native').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 const EXE = path.join(NATIVE_DIR, 'syshelper.exe');
+// What the helper writes to stderr: only something going wrong, such as a fatal
+// error in libVIIPER (Go prints it there before it aborts the process).
+const ERROR_LOG = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'PS5 Game Launcher', 'helper-errors.log') : null;
+
+function errorLog() {
+  if (!ERROR_LOG) return 'ignore';
+  try {
+    fs.mkdirSync(path.dirname(ERROR_LOG), { recursive: true });
+    if (fs.existsSync(ERROR_LOG) && fs.statSync(ERROR_LOG).size > 256 * 1024) fs.unlinkSync(ERROR_LOG);
+    const fd = fs.openSync(ERROR_LOG, 'a');
+    fs.writeSync(fd, `--- ${new Date().toISOString()} helper started\n`);
+    return fd;
+  } catch {
+    return 'ignore';
+  }
+}
 
 class SystemBridge extends EventEmitter {
   constructor() {
@@ -28,11 +44,15 @@ class SystemBridge extends EventEmitter {
   }
 
   start() {
-    if (this.proc || !this.available()) return;
+    // Once stopped (the launcher is quitting) it stays stopped: a request made
+    // on the way out would otherwise start a new helper that dies half set up.
+    if (this.proc || this.stopped || !this.available()) return;
     // detached: keep the helper out of Node's kill-on-close job, so if the
     // launcher ever dies it still gets to resume a paused game before exiting
     // (it exits by itself as soon as its stdin closes).
-    const proc = spawn(EXE, [], { windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    const stderr = errorLog();
+    const proc = spawn(EXE, [], { windowsHide: true, detached: true, stdio: ['pipe', 'pipe', stderr] });
+    if (typeof stderr === 'number') fs.closeSync(stderr); // the helper has its own handle to it
     this.proc = proc;
     const rl = readline.createInterface({ input: proc.stdout });
     rl.on('line', (line) => {
@@ -72,6 +92,7 @@ class SystemBridge extends EventEmitter {
 
   request(cmd, args = {}, timeout = 8000) {
     if (!this.available()) return Promise.reject(new Error('System helper is not available'));
+    if (this.stopped) return Promise.reject(new Error('System helper is stopped'));
     if (!this.proc) {
       if (this.failures > 5) return Promise.reject(new Error('System helper keeps crashing'));
       this.start();
@@ -185,6 +206,16 @@ class SystemBridge extends EventEmitter {
     return this.request('setNightLight', { value: !!on });
   }
 
+  /** HDR per display: [{ name, supported, on }]. */
+  hdr() {
+    return this.request('hdr');
+  }
+
+  /** index: one display (as listed by hdr()), -1 for every one that has HDR. */
+  setHdr(on, index = -1) {
+    return this.request('setHdr', { value: !!on, index }, 15000);
+  }
+
   bluetooth() {
     return this.request('bt', {}, 20000);
   }
@@ -231,6 +262,7 @@ class SystemBridge extends EventEmitter {
   }
 
   stop() {
+    this.stopped = true;
     if (this.proc) {
       // Closing stdin makes the helper resume any paused game and exit by itself.
       const proc = this.proc;

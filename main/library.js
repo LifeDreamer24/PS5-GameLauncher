@@ -4,6 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const scanner = require('./scanner');
 const meta = require('./metadata');
+const emulators = require('./emulators');
 
 const ART_KEYS = ['hero', 'logo', 'capsule', 'banner', 'grid', 'icon'];
 
@@ -23,6 +24,7 @@ class Library {
     this.scanning = null;
     this.steamInfo = null;
     this.epicFound = false;
+    this.emulatorInfo = {}; // platform -> what the emulator is (emulators.detectSwitch) and its game count
     this.publishTimer = null;
     if (!Array.isArray(this.store.data.games)) this.store.data.games = [];
     if (!Array.isArray(this.store.data.excluded)) this.store.data.excluded = [];
@@ -133,6 +135,17 @@ class Library {
       this.progress({ active: true, label: `Scanning ${path.basename(folder) || folder}…`, current: 0, total: 0 });
       found.push(...(await scanner.scanFolder(folder)));
     }
+    const sw = s.emulators && s.emulators.switch;
+    if (sw && sw.exe) {
+      this.progress({ active: true, label: 'Scanning Nintendo Switch games…', current: 0, total: 0 });
+      try {
+        const r = await emulators.scanSwitch(sw);
+        this.emulatorInfo.switch = r.info ? { ...r.info, count: r.games.length } : null;
+        found.push(...r.games);
+      } catch (err) {
+        console.warn('[scan] switch failed', err);
+      }
+    } else delete this.emulatorInfo.switch;
 
     const added = this.merge(found);
     this.store.saveNow();
@@ -165,12 +178,17 @@ class Library {
     const excluded = new Set(this.store.data.excluded);
     const byId = new Map(this.games.map((g) => [g.id, g]));
     const steamIds = new Set(found.filter((r) => r.source === 'steam').map((r) => r.steamAppId));
+    // Emulated games, by ROM: a shortcut that starts the emulator with one of
+    // them gives way to the emulator's own entry (and hands over its history).
+    const roms = new Map(found.filter((r) => r.source === 'emulator').map((r) => [path.normalize(r.path).toLowerCase(), r]));
+    const romShortcut = (g) => g.source !== 'emulator' && roms.get(emulators.romOfLaunch(g.launch));
     const seen = new Set();
     const added = [];
 
     for (const r of found) {
       if (excluded.has(r.id) || seen.has(r.id)) continue;
       if (r.source === 'folder' && r.steamAppId && steamIds.has(r.steamAppId)) continue;
+      if (romShortcut(r)) continue;
       seen.add(r.id);
       const g = byId.get(r.id);
       if (g) {
@@ -187,21 +205,35 @@ class Library {
         }
       } else {
         const ng = this.newGame(r);
+        // Already in the library as a shortcut to the emulator: keep its history.
+        const old = r.source === 'emulator' && this.games.find((o) => romShortcut(o) === r);
+        if (old) {
+          for (const k of ['addedAt', 'lastPlayed', 'playtime', 'launchCount', 'favorite', 'hidden', 'pauseMode', 'controllerMode', 'padEmulation']) {
+            if (old[k] !== undefined) ng[k] = old[k];
+          }
+          if (old.nameLocked) Object.assign(ng, { name: old.name, nameLocked: true });
+        }
         this.games.push(ng);
         byId.set(ng.id, ng);
-        added.push(ng);
+        // Not announced as new when it only replaced its shortcut.
+        if (!old) added.push(ng);
       }
     }
 
     const folders = new Set(s.folders || []);
     const removed = [];
     this.store.data.games = this.games.filter((g) => {
+      if (romShortcut(g)) {
+        removed.push(g);
+        return false;
+      }
       let keep = true;
       if (g.source === 'steam') keep = s.scanSteam && seen.has(g.id);
       else if (g.source === 'epic') keep = s.scanEpic && seen.has(g.id);
       else if (g.source === 'xbox') keep = s.scanXbox !== false && seen.has(g.id);
       else if (g.source === 'ubisoft') keep = s.scanUbisoft !== false && seen.has(g.id);
       else if (g.source === 'folder') keep = folders.has(g.folder) && seen.has(g.id);
+      else if (g.source === 'emulator') keep = seen.has(g.id);
       if (!keep) removed.push(g);
       return keep;
     });
@@ -264,9 +296,10 @@ class Library {
     let done = 0;
     this.progress({ active: true, label: 'Finding artwork…', current: 0, total });
 
-    // 1. Resolve Steam app ids by name for non-Steam entries.
+    // 1. Resolve Steam app ids by name for non-Steam entries (emulated games
+    // aren't on Steam: they get Nintendo's art in fetchArtFor).
     for (const g of games) {
-      if (g.steamAppId || g.noSteamMatch) continue;
+      if (g.steamAppId || g.noSteamMatch || g.platform) continue;
       this.progress({ active: true, label: `Matching ${g.name}…`, current: done, total });
       try {
         const m = await meta.resolveSteamAppId(g.name);
@@ -315,6 +348,14 @@ class Library {
     for (const k of ART_KEYS) if (custom[k] && g.art && g.art[k]) art[k] = g.art[k];
 
     const steam = g.steamAppId ? meta.steamCandidates(g.steamAppId, item) : null;
+    // A Switch game: Nintendo's own name, box art, square and wide images.
+    let nin = null;
+    if (g.platform === 'switch') {
+      try {
+        nin = await emulators.nintendoLookup(g, meta.scoreMatch);
+      } catch {}
+    }
+    const ninArt = nin ? emulators.nintendoCandidates(nin) : null;
     let sg = null;
     if (s.sgdbKey) {
       try {
@@ -323,7 +364,7 @@ class Library {
     }
     const preferSg = s.artSource === 'sgdb';
     const order = (k) => {
-      const a = (steam && steam[k]) || [];
+      const a = [...((steam && steam[k]) || []), ...((ninArt && ninArt[k]) || [])];
       const b = (sg && sg[k]) || [];
       return preferSg ? [...b, ...a] : [...a, ...b];
     };
@@ -334,6 +375,7 @@ class Library {
     };
     await Promise.all([get('hero', order('hero')), get('logo', order('logo')), get('capsule', order('capsule')), get('banner', order('banner'))]);
     if (sg && sg.grid.length) await get('grid', sg.grid.slice(0, 3));
+    if (ninArt) await get('grid', ninArt.grid);
 
     // Steam's own library cache (newer games keep logos under hashed paths
     // that the public store API does not expose).
@@ -350,8 +392,8 @@ class Library {
     }
     if (!art.hero && steam && steam.backdrop.length) await get('hero', steam.backdrop);
 
-    // Executable icon as a last-resort tile.
-    const exe = g.exe || (g.launch && g.launch.type === 'exe' ? g.launch.target : null);
+    // Executable icon as a last-resort tile (an emulator's icon says nothing about the game).
+    const exe = g.platform ? null : g.exe || (g.launch && g.launch.type === 'exe' ? g.launch.target : null);
     if (!art.icon && exe && fs.existsSync(exe)) {
       try {
         const img = await app.getFileIcon(exe, { size: 'large' });
@@ -368,11 +410,15 @@ class Library {
     if (item) {
       g.meta = meta.steamMeta(item);
       g.screenshots = meta.steamScreenshots(item);
+    } else if (nin) {
+      g.meta = emulators.nintendoMeta(nin);
+      g.screenshots = [];
+      if (!g.nameLocked && g.meta.title) g.name = g.meta.title;
     } else if (!g.steamAppId) {
       g.meta = {};
       g.screenshots = [];
     }
-    g.metaStatus = g.steamAppId || sg ? 'ok' : 'notfound';
+    g.metaStatus = g.steamAppId || sg || nin ? 'ok' : 'notfound';
   }
 
   async steamLocalAssets(appid) {

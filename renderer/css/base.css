@@ -140,10 +140,11 @@ svg.ic {
   filter: brightness(0.42) blur(0.5rem) saturate(1.1);
 }
 
-#app.launching {
-  transform: scale(1.04);
-  filter: brightness(0.2) blur(0.4rem);
-  transition-duration: 0.9s;
+/* Starting a game (see .launch-overlay): the page's buttons and text fade out
+   while its background stays, as on the PS5. */
+#app.launching #views {
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
 }
 
 #bg-canvas {

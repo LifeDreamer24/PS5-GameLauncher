@@ -4,8 +4,11 @@ setlocal
 set FW=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319
 set WM=%WINDIR%\System32\WinMetadata
 cd /d "%~dp0"
+rem Concentus.dll (scripts/fetch-concentus.js): the Opus encoder for a DualSense speaker on Bluetooth.
+set OPUS=
+if exist Concentus.dll set OPUS=/r:Concentus.dll /define:OPUS
 "%FW%\csc.exe" /nologo /codepage:65001 /optimize+ /target:exe /platform:x64 /out:syshelper.exe ^
   /r:"%WM%\Windows.Foundation.winmd" /r:"%WM%\Windows.Media.winmd" /r:"%WM%\Windows.Storage.winmd" /r:"%WM%\Windows.Devices.winmd" ^
   /r:"%FW%\System.Runtime.dll" /r:"%FW%\System.Runtime.InteropServices.WindowsRuntime.dll" ^
-  /r:System.Web.Extensions.dll /r:System.Management.dll ^
+  /r:System.Web.Extensions.dll /r:System.Management.dll %OPUS% ^
   syshelper.cs

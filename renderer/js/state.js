@@ -158,11 +158,13 @@ export function sourceLabel(g) {
   if (g.source === 'epic') return 'EPIC';
   if (g.source === 'xbox') return 'XBOX';
   if (g.source === 'ubisoft') return 'UBISOFT';
+  if (g.source === 'emulator') return g.platform === 'switch' ? 'SWITCH' : 'EMULATOR';
   if (g.launch && /^steam:/.test(g.launch.target || '')) return 'STEAM';
   return 'PC';
 }
 
 export function sourceName(g) {
+  if (g.source === 'emulator') return t('Nintendo Switch ({emulator})', { emulator: g.emulator || 'Emulator' });
   return t({ steam: 'Steam', epic: 'Epic Games', xbox: 'Xbox', ubisoft: 'Ubisoft Connect', folder: 'Shortcut folder', manual: 'Added manually' }[g.source] || 'PC');
 }
 

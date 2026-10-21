@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, shell, Menu, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
 const { pathToFileURL } = require('url');
+const { Readable } = require('stream');
 const { JsonStore } = require('./store');
 const { Library } = require('./library');
 const { launchGame } = require('./launcher');
@@ -15,10 +16,14 @@ const { SoundPacks } = require('./soundpacks');
 const { ObsBridge } = require('./obs');
 const { SteamDownloads } = require('./steamdownloads');
 const { Storage } = require('./storage');
+const files = require('./files');
+const emulators = require('./emulators');
 
 const DEFAULT_SETTINGS = {
   // Library
   folders: [],
+  // Emulators, by platform: { switch: { exe, fullscreen } } (main/emulators.js)
+  emulators: {},
   scanSteam: true,
   scanEpic: true,
   scanXbox: true,
@@ -413,7 +418,7 @@ function start() {
     if (overlay.visible) overlay.send('pad:action', { action: e.action, repeat: !!e.repeat, kind: e.kind });
     // With controller passthrough the launcher reads the real controller
     // through the helper too (the virtual one is muted while it is in front).
-    else if ((passthrough.enabled || passthrough.fallback) && win && win.isFocused() && !win.isMinimized()) win.webContents.send('pad:action', { action: e.action, repeat: !!e.repeat, kind: e.kind });
+    else if ((passthrough.enabled || passthrough.fallback || passthrough.starting) && win && win.isFocused() && !win.isMinimized()) win.webContents.send('pad:action', { action: e.action, repeat: !!e.repeat, kind: e.kind });
   });
 
   /* ---- Controller passthrough (HidHide + libVIIPER) ----------------
@@ -423,7 +428,9 @@ function start() {
      game can't react to the menu's button presses. */
   // fallback: passthrough just went off and the launcher window doesn't see
   // the controller again yet, so it keeps getting it through the helper.
-  const passthrough = { enabled: false, state: null, fallback: false };
+  // starting: it is being switched on at startup; the launcher window reads the
+  // controller through the helper meanwhile (it doesn't read it itself then).
+  const passthrough = { enabled: false, state: null, fallback: false, starting: false };
   system.on('passthrough', (e) => {
     passthrough.state = e.state;
     send('passthrough:state', e.state);
@@ -491,6 +498,7 @@ function start() {
     if (real) st = { ...st, realGame: real.name };
     passthrough.enabled = !!(st && st.enabled);
     passthrough.state = st;
+    passthrough.starting = false;
     system.keepPadForward(passthrough.enabled || passthrough.fallback);
     send('passthrough:state', st);
     lastMute = null;
@@ -623,16 +631,27 @@ function start() {
       const inside = path.relative(base, file);
       if (!inside || inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) return new Response('forbidden', { status: 403 });
       try {
-        // Range requests pass through, so videos can seek.
-        const range = req.headers.get('range');
-        const res = await net.fetch(pathToFileURL(file).toString(), range ? { headers: { range } } : undefined);
         const headers = {
           'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
           'access-control-allow-origin': '*',
           'cache-control': u.hostname === 'ui' || u.hostname === 'captures' ? 'no-cache' : 'max-age=31536000',
           'accept-ranges': 'bytes',
         };
-        for (const k of ['content-range', 'content-length']) if (res.headers.get(k)) headers[k] = res.headers.get(k);
+        // Byte ranges are answered here (a file:// fetch sends the whole file
+        // for them): without a 206, a video counts as not seekable until it has
+        // loaded completely, and jumping in a long clip snaps back to the start.
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('range') || '');
+        if (range) {
+          const { size } = await fs.promises.stat(file);
+          let start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2] || 0));
+          let end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          if (start >= size || start > end) return new Response(null, { status: 416, headers: { ...headers, 'content-range': `bytes */${size}` } });
+          headers['content-range'] = `bytes ${start}-${end}/${size}`;
+          headers['content-length'] = String(end - start + 1);
+          return new Response(Readable.toWeb(fs.createReadStream(file, { start, end })), { status: 206, headers });
+        }
+        const res = await net.fetch(pathToFileURL(file).toString());
+        if (res.headers.get('content-length')) headers['content-length'] = res.headers.get('content-length');
         return new Response(res.body, { status: res.status, headers });
       } catch {
         return new Response('not found', { status: 404 });
@@ -641,8 +660,14 @@ function start() {
 
     createWindow();
     system.start();
-    // Always: when it is off this also undoes hiding left over from a crash.
-    setTimeout(applyPassthrough, 1200);
+    // Right away, so the controller's one restart (see the helper's Hide) falls
+    // in the boot screen. Always: when it is off this also undoes hiding left
+    // over from a crash.
+    if (settings.data.controllerPassthrough) {
+      passthrough.starting = true;
+      system.keepPadForward(true);
+    }
+    applyPassthrough();
     discord.start();
     overlay.create();
     monitor.start();
@@ -752,13 +777,10 @@ function start() {
   ipcMain.handle('library:scan', () => library.scan({ silent: false }));
   ipcMain.handle('library:refreshAll', () => library.fetchMetadata(library.games.slice(), { force: true }));
 
-  ipcMain.handle('library:addFolder', async () => {
-    const r = await dialog.showOpenDialog(win, {
-      title: 'Choose a folder with game shortcuts',
-      properties: ['openDirectory'],
-    });
-    if (r.canceled || !r.filePaths[0]) return null;
-    const folder = r.filePaths[0];
+  // Paths come from the launcher's own file browser (renderer/js/ui/filebrowser.js).
+  ipcMain.handle('library:addFolder', async (_e, picked) => {
+    if ((await files.kind(picked)) !== 'dir') return null;
+    const folder = path.resolve(picked);
     const s = settings.data;
     if (!s.folders.includes(folder)) s.folders.push(folder);
     settings.saveNow();
@@ -777,15 +799,7 @@ function start() {
   });
 
   ipcMain.handle('library:import', (_e, paths) => library.importPaths(Array.isArray(paths) ? paths : []));
-  ipcMain.handle('library:addFiles', async () => {
-    const r = await dialog.showOpenDialog(win, {
-      title: 'Add games',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Games & shortcuts', extensions: ['lnk', 'url', 'exe', 'bat', 'cmd'] }],
-    });
-    if (r.canceled) return 0;
-    return library.importPaths(r.filePaths);
-  });
+  ipcMain.handle('library:addFiles', (_e, paths) => library.importPaths((Array.isArray(paths) ? paths : []).filter((p) => /\.(lnk|url|exe|bat|cmd)$/i.test(String(p)))));
   ipcMain.handle('library:restoreExcluded', async () => {
     const n = library.restoreExcluded();
     await library.scan({ silent: true });
@@ -807,25 +821,15 @@ function start() {
     return g ? library.fetchMetadata([g], { force: true }) : null;
   });
   ipcMain.handle('game:setMatch', (_e, id, appid) => library.setMatch(id, appid));
-  ipcMain.handle('game:customArt', async (_e, id, kind) => {
-    const r = await dialog.showOpenDialog(win, {
-      title: 'Choose an image',
-      properties: ['openFile'],
-      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
-    });
-    if (r.canceled || !r.filePaths[0]) return null;
-    return library.setCustomArt(id, kind, r.filePaths[0]);
+  const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
+  ipcMain.handle('game:customArt', async (_e, id, kind, file) => {
+    if (!IMAGE.test(String(file)) || (await files.kind(file)) !== 'file') return null;
+    return library.setCustomArt(id, kind, file);
   });
   // Profile pictures are copied into the data folder under a new name, so
   // replacing one never shows a stale cached image.
-  ipcMain.handle('profile:pickImage', async () => {
-    const r = await dialog.showOpenDialog(win, {
-      title: 'Choose a profile picture',
-      properties: ['openFile'],
-      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
-    });
-    if (r.canceled || !r.filePaths[0]) return null;
-    const src = r.filePaths[0];
+  ipcMain.handle('profile:pickImage', async (_e, src) => {
+    if (!IMAGE.test(String(src)) || (await files.kind(src)) !== 'file') return null;
     const name = `${Date.now().toString(36)}${path.extname(src).toLowerCase()}`;
     await fs.promises.mkdir(avatarDir, { recursive: true });
     await fs.promises.copyFile(src, path.join(avatarDir, name));
@@ -835,12 +839,119 @@ function start() {
     const m = /^app:\/\/avatar\/([\w.-]+)$/.exec(String(url || ''));
     if (m) await fs.promises.rm(path.join(avatarDir, m[1]), { force: true }).catch(() => {});
   });
-  ipcMain.handle('game:openLocation', (_e, id) => {
+  // Where a game is on disk, for the file browser: its folder, with its file picked out.
+  ipcMain.handle('game:location', (_e, id) => {
     const g = library.find(id);
-    if (!g) return;
+    if (!g) return null;
+    if (g.source === 'steam' && g.installDir && fs.existsSync(g.installDir)) return { dir: g.installDir, file: null };
     const target = g.path || g.exe || g.installDir;
-    if (target && fs.existsSync(target)) shell.showItemInFolder(target);
-    else if (g.installDir && fs.existsSync(g.installDir)) shell.openPath(g.installDir);
+    if (target && fs.existsSync(target)) return fs.statSync(target).isDirectory() ? { dir: target, file: null } : { dir: path.dirname(target), file: path.basename(target) };
+    if (g.installDir && fs.existsSync(g.installDir)) return { dir: g.installDir, file: null };
+    return null;
+  });
+
+  /* ---- The launcher's file browser (main/files.js) ---------------- */
+  ipcMain.handle('fs:list', (_e, dir, opts) => files.list(dir, opts || {}));
+  ipcMain.handle('fs:places', async () => files.places(await storage.drives().catch(() => [])));
+  ipcMain.handle('fs:icon', (_e, file) => files.iconOf(String(file || '')));
+  ipcMain.handle('fs:mkdir', (_e, dir, name) => files.mkdir(dir, name));
+  ipcMain.handle('fs:kind', (_e, p) => files.kind(p));
+  // The way out to Windows: the item in File Explorer, or a file opened with its program.
+  ipcMain.handle('fs:showInExplorer', async (_e, p) => {
+    const k = await files.kind(p);
+    if (k === 'file') shell.showItemInFolder(path.resolve(p));
+    else if (k === 'dir') await shell.openPath(path.resolve(p));
+  });
+  ipcMain.handle('fs:open', async (_e, p) => ((await files.kind(p)) === 'file' ? shell.openPath(path.resolve(p)) : 'not a file'));
+
+  /* ---- Emulators (main/emulators.js) ------------------------------ */
+  async function emulatorInfo() {
+    const conf = (settings.data.emulators || {}).switch;
+    if (!conf || !conf.exe) return { switch: null };
+    const info = await emulators.detectSwitch(conf.exe);
+    const count = library.games.filter((g) => g.source === 'emulator' && g.platform === 'switch').length;
+    return { switch: { ...info, fullscreen: conf.fullscreen !== false, count, players: conf.players || [] } };
+  }
+  ipcMain.handle('emulators:info', () => emulatorInfo());
+  // The controllers connected now, for the players' choices.
+  ipcMain.handle('emulators:pads', async () => emulators.describePads(await system.request('gamepads', {}, 4000).catch(() => [])));
+
+  /**
+   * Right before a Switch game starts: the players get the controllers chosen
+   * in Settings › Library › Emulators, as the emulator will see them (with
+   * controller passthrough, the launcher's virtual pads). Returns a note for
+   * players whose controller isn't there.
+   */
+  async function applySwitchPlayers(g) {
+    const conf = (settings.data.emulators || {}).switch;
+    const wanted = (conf && conf.players) || [];
+    if (!wanted.some(Boolean)) return null;
+    const info = await emulators.detectSwitch(conf.exe);
+    if (!info.userDir) return null;
+    // Running already: it would write its own settings back over these when it closes.
+    const running = await new Promise((res) => execFile('tasklist', ['/FI', `IMAGENAME eq ${path.basename(conf.exe)}`, '/NH'], { windowsHide: true }, (err, out) => res(!err && out.toLowerCase().includes(path.basename(conf.exe).toLowerCase()))));
+    if (running) return 'The emulator was already open, so its players weren’t changed.';
+    const pads = emulators.describePads(await system.request('gamepads', {}, 4000).catch(() => []));
+    const pass = settings.data.controllerPassthrough && passthrough.enabled && g.controllerMode !== 'real' ? { emulation: emulationFor() } : null;
+    const players = {};
+    const ports = new Map();
+    const missing = [];
+    wanted.forEach((w, n) => {
+      if (!w) return;
+      if (w === 'off') {
+        players[n] = 'off';
+        return;
+      }
+      const pad = pads.find((p) => p.id === w.id);
+      if (!pad) return missing.push(n + 1);
+      const guid = emulators.edenGuid(pad, pass);
+      const port = ports.get(guid) || 0;
+      ports.set(guid, port + 1);
+      players[n] = { guid, port };
+    });
+    await emulators.writeSwitchPlayers(info.userDir, players);
+    return missing.length ? 'A player’s controller isn’t connected, so the emulator’s own setting is used for that player.' : null;
+  }
+  // Set (or change) an emulator: checked first, then its games are scanned in.
+  ipcMain.handle('emulators:set', async (_e, platform, conf) => {
+    if (platform !== 'switch' || !conf) return emulatorInfo();
+    const cur = (settings.data.emulators || {}).switch || {};
+    const next = {
+      ...cur,
+      exe: conf.exe !== undefined ? String(conf.exe || '') : cur.exe,
+      fullscreen: conf.fullscreen !== undefined ? !!conf.fullscreen : cur.fullscreen !== false,
+    };
+    // Players 1-8: null (as the emulator has it), 'off' or { id, name } of a controller.
+    if (Array.isArray(conf.players)) {
+      next.players = Array.from({ length: 8 }, (_, i) => {
+        const p = conf.players[i];
+        return p === 'off' ? 'off' : p && p.id ? { id: String(p.id), name: String(p.name || '') } : null;
+      });
+    }
+    if (conf.players !== undefined && conf.exe === undefined && conf.fullscreen === undefined) {
+      settings.data.emulators = { ...(settings.data.emulators || {}), switch: next };
+      settings.saveNow();
+      send('settings:changed', settings.data);
+      return emulatorInfo();
+    }
+    if (conf.exe !== undefined) {
+      const info = await emulators.detectSwitch(next.exe);
+      if (!info.userDir) return { switch: { ...info, count: 0 }, rejected: true };
+    }
+    settings.data.emulators = { ...(settings.data.emulators || {}), switch: next };
+    settings.saveNow();
+    send('settings:changed', settings.data);
+    await library.scan({ silent: conf.exe === undefined });
+    return emulatorInfo();
+  });
+  ipcMain.handle('emulators:remove', async (_e, platform) => {
+    const all = { ...(settings.data.emulators || {}) };
+    delete all[platform];
+    settings.data.emulators = all;
+    settings.saveNow();
+    send('settings:changed', settings.data);
+    await library.scan({ silent: true });
+    return emulatorInfo();
   });
 
   ipcMain.handle('game:launch', async (_e, id) => {
@@ -851,6 +962,10 @@ function start() {
     monitor.noteLaunch(id);
     launchingPad = { id, until: Date.now() + 90000 };
     applyEmulation();
+    if (g.source === 'emulator' && g.platform === 'switch') {
+      const note = await applySwitchPlayers(g).catch((err) => (console.warn('[switch players]', err), 'The emulator’s players couldn’t be set up.'));
+      if (note) send('notify', { title: g.name, body: note, icon: 'gamepad', kind: 'game' });
+    }
     setTimeout(applyEmulation, 91000); // it never showed up: back to the usual controller
     g.lastPlayed = Date.now();
     g.launchCount = (g.launchCount || 0) + 1;
@@ -981,14 +1096,10 @@ function start() {
     }
     return true;
   });
-  ipcMain.handle('sounds:installLocal', async (_e, kind) => {
-    const r = await dialog.showOpenDialog(win, {
-      title: 'Choose a sound pack',
-      properties: kind === 'folder' ? ['openDirectory'] : ['openFile'],
-      filters: kind === 'folder' ? [] : [{ name: 'Sound pack', extensions: ['zip'] }],
-    });
-    if (r.canceled || !r.filePaths[0]) return null;
-    return packs.installLocal(r.filePaths[0]);
+  ipcMain.handle('sounds:installLocal', async (_e, kind, picked) => {
+    const k = await files.kind(picked);
+    if (kind === 'folder' ? k !== 'dir' : k !== 'file' || !/\.zip$/i.test(String(picked))) return null;
+    return packs.installLocal(path.resolve(picked));
   });
 
   ipcMain.handle('pad:fallback', (_e, on) => {
@@ -1007,6 +1118,7 @@ function start() {
   };
   const captureError = (title, err) => captureNote({ title, body: String((err && err.message) || err), icon: 'info' });
   ipcMain.handle('capture:state', () => obs.publicState());
+  ipcMain.handle('capture:encoders', () => obs.encoderInfo());
   ipcMain.handle('capture:list', () => obs.list());
   // One file, or several (Media Gallery › Select Media).
   ipcMain.handle('capture:delete', async (_e, file) => {
@@ -1016,19 +1128,18 @@ function start() {
     return n;
   });
   ipcMain.handle('capture:favorite', (_e, file, on) => obs.setFavorite(file, !!on));
-  ipcMain.handle('capture:reveal', (_e, file) => shell.showItemInFolder(path.join(obs.dir, path.basename(String(file || '')))));
-  ipcMain.handle('capture:openFolder', async () => {
+  // The captures folder (made if needed), for the file browser.
+  ipcMain.handle('capture:dir', async () => {
     await fs.promises.mkdir(obs.dir, { recursive: true }).catch(() => {});
-    return shell.openPath(obs.dir);
+    return obs.dir;
   });
-  ipcMain.handle('capture:pickDir', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Choose where captures are saved', defaultPath: obs.dir, properties: ['openDirectory', 'createDirectory'] });
-    if (r.canceled || !r.filePaths[0]) return null;
-    settings.data.captureDir = r.filePaths[0];
+  ipcMain.handle('capture:pickDir', async (_e, dir) => {
+    if ((await files.kind(dir)) !== 'dir') return null;
+    settings.data.captureDir = path.resolve(dir);
     settings.saveNow();
     send('settings:changed', settings.data);
     obs.onSettings().catch(() => {});
-    return r.filePaths[0];
+    return settings.data.captureDir;
   });
   ipcMain.handle('capture:open', () => onShare());
   ipcMain.handle('capture:action', async (_e, kind) => {
@@ -1106,6 +1217,8 @@ function start() {
   ipcMain.handle('sys:setBrightness', (_e, v, index) => system.setBrightness(v, index));
   ipcMain.handle('sys:nightLight', () => system.nightLight());
   ipcMain.handle('sys:setNightLight', (_e, on) => system.setNightLight(on));
+  ipcMain.handle('sys:hdr', () => system.hdr());
+  ipcMain.handle('sys:setHdr', (_e, on, index) => system.setHdr(on, Number.isInteger(index) ? index : -1));
   ipcMain.handle('bt:state', () => system.bluetooth());
   ipcMain.handle('bt:radio', (_e, on) => system.bluetoothRadio(on));
   ipcMain.handle('bt:connect', (_e, address, connect) => system.bluetoothConnect(address, connect));
@@ -1154,7 +1267,7 @@ function start() {
   ipcMain.handle('steam:search', (_e, term) => searchSteam(String(term || '')).catch(() => []));
 
   ipcMain.handle('cache:size', () => library.cacheSize());
-  ipcMain.handle('app:openData', () => shell.openPath(dataDir));
+  ipcMain.handle('app:dataDir', () => dataDir);
   ipcMain.handle('app:openExternal', (_e, url) => {
     if (/^(steam:\/\/|discord:\/\/|https:\/\/(store\.steampowered\.com|www\.steamgriddb\.com|discord\.com\/developers|github\.com\/nefarius\/HidHide|github\.com\/Alia5\/VIIPER|obsproject\.com)\/?)/.test(String(url))) {
       return shell.openExternal(url);

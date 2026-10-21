@@ -15,6 +15,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const encoders = require('./encoders');
 
 const NAME = 'PS5 Game Launcher'; // profile and scene collection
 const PROFILE_DIR = 'PS5_Game_Launcher';
@@ -461,41 +462,55 @@ class ObsBridge extends EventEmitter {
     }
   }
 
-  /** Our profile's settings from Settings › Captures. */
+  /**
+   * Our profile's settings from Settings › Captures. OBS's advanced output
+   * mode, so the encoder and all of its settings can be chosen (the simple
+   * mode only has a few quality steps). _encoder is the encoder's own
+   * settings (recordEncoder.json), not part of basic.ini.
+   */
   async profileSettings() {
     const s = this.settings.data;
     const seconds = Number(s.captureClipLength) || 60;
-    const bitrate = Number(s.captureBitrate) || 20000;
     const encoder = await this.encoder();
+    const enc = this.encoderSettings(encoder);
+    // The replay buffer's memory: enough for its length at the bitrate (quality
+    // modes have none: room for 150 Mbps then).
+    const peak = encoders.usesBitrate(encoder, enc) ? Math.max(Number(enc.bitrate) || 0, Number(enc.max_bitrate) || 0) * 1.25 : 150000;
+    const format = ['mp4', 'mkv', 'hybrid_mp4'].includes(s.captureFormat) ? s.captureFormat : 'mp4';
     const { width, height } = this.screenSize();
     const target = Number(s.captureResolution) || 0; // 0 = same as the screen
     const outH = target && target < height ? target : height;
     const outW = Math.round((width * outH) / height / 2) * 2;
     const userIni = this.readIni(this.profileFile(this.userProfileDir() || 'Untitled'));
     const audio = userIni.Audio || {};
+    const rbSize = String(Math.max(512, Math.ceil((seconds * peak) / 8 / 1000)));
     return {
       General: { Name: NAME },
-      Output: { Mode: 'Simple', FilenameFormatting: '%CCYY-%MM-%DD %hh-%mm-%ss' },
-      SimpleOutput: {
-        FilePath: this.dir,
-        RecFormat2: s.captureFormat === 'mkv' ? 'mkv' : 'mp4',
-        RecQuality: { standard: 'Stream', high: 'Small', best: 'HQ' }[s.captureQuality] || 'Small',
+      Output: { Mode: 'Advanced', FilenameFormatting: '%CCYY-%MM-%DD %hh-%mm-%ss' },
+      AdvOut: {
+        RecType: 'Standard',
+        RecFilePath: this.dir,
+        RecFormat2: format,
+        Encoder: encoder,
         RecEncoder: encoder,
-        StreamEncoder: encoder,
-        VBitrate: String(Math.round(bitrate)),
-        ABitrate: '192',
+        RecUseRescale: 'false',
+        RecTracks: '1',
+        AudioEncoder: 'ffmpeg_aac',
+        RecAudioEncoder: 'ffmpeg_aac',
+        Track1Bitrate: '192',
         RecRB: 'true',
         RecRBTime: String(seconds),
-        // Memory for the buffer: enough for the length at a generous bitrate.
-        RecRBSize: String(Math.max(512, Math.ceil((seconds * Math.max(bitrate, 50000)) / 8 / 1000))),
-        RecRBPrefix: 'Clip',
+        RecRBSize: rbSize,
       },
+      // The replay buffer's file names come from here in both modes.
+      SimpleOutput: { FilePath: this.dir, RecRB: 'true', RecRBTime: String(seconds), RecRBSize: rbSize, RecRBPrefix: 'Clip' },
       Video: { BaseCX: String(width), BaseCY: String(height), OutputCX: String(outW), OutputCY: String(outH), FPSType: '1', FPSInt: String(Number(s.captureFps) || 60), ScaleType: 'bicubic' },
       Audio: {
         SampleRate: audio.SampleRate || '48000',
         ChannelSetup: audio.ChannelSetup || 'Stereo',
         ...(audio.MonitoringDeviceId ? { MonitoringDeviceId: audio.MonitoringDeviceId, MonitoringDeviceName: audio.MonitoringDeviceName || 'Default' } : {}),
       },
+      _encoder: enc,
     };
   }
 
@@ -504,8 +519,12 @@ class ObsBridge extends EventEmitter {
     const ours = await this.profileSettings();
     const file = this.profileFile(PROFILE_DIR);
     const ini = this.readIni(file);
-    for (const [sec, kv] of Object.entries(ours)) ini[sec] = { ...(ini[sec] || {}), ...kv };
+    for (const [sec, kv] of Object.entries(ours)) if (!sec.startsWith('_')) ini[sec] = { ...(ini[sec] || {}), ...kv };
     this.writeIni(file, ini);
+    // The encoder's own settings (advanced mode reads them from these files).
+    const json = JSON.stringify(ours._encoder, null, 2);
+    fs.writeFileSync(path.join(path.dirname(file), 'recordEncoder.json'), json);
+    fs.writeFileSync(path.join(path.dirname(file), 'streamEncoder.json'), json);
     return crypto.createHash('sha1').update(JSON.stringify(ours)).digest('hex');
   }
 
@@ -546,18 +565,71 @@ class ObsBridge extends EventEmitter {
     }
   }
 
-  /** The video encoder for OBS's simple output mode. */
-  async encoder() {
-    const want = this.settings.data.captureEncoder || 'auto';
-    if (want !== 'auto') return want;
-    if (!this.gpu) {
+  /** The encoders OBS can use here (main/encoders.js), with what each can be set to. */
+  async encoderList() {
+    if (this.gpu === undefined) {
       const out = await run('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name -join "|"']);
       this.gpu = out.toLowerCase();
     }
-    if (/nvidia|geforce|rtx|gtx/.test(this.gpu)) return 'nvenc';
-    if (/amd|radeon/.test(this.gpu)) return 'amd';
-    if (/intel/.test(this.gpu)) return 'qsv';
-    return 'x264';
+    return encoders.available(this.obsDir(), this.gpu);
+  }
+
+  /**
+   * The video encoder (an OBS encoder id): the one picked in Settings ›
+   * Captures if OBS has it, else the hardware one for the chosen codec.
+   * Before encoders were picked by id the setting was a vendor (amd, nvenc…).
+   */
+  async encoder() {
+    const s = this.settings.data;
+    const { encoders: list } = await this.encoderList();
+    const want = s.captureEncoder || 'auto';
+    if (list.some((e) => e.id === want)) return want;
+    const codec = s.captureCodec || 'h264';
+    const family = { amd: 'amf', nvenc: 'nvenc', qsv: 'qsv', x264: 'x264' }[want];
+    const forCodec = list.filter((e) => e.codec === codec);
+    const pick =
+      (family && forCodec.find((e) => e.family === family)) ||
+      forCodec.find((e) => e.hw) ||
+      forCodec[0] ||
+      list.find((e) => e.codec === 'h264' && e.hw) ||
+      list.find((e) => e.id === 'obs_x264');
+    return pick ? pick.id : 'obs_x264';
+  }
+
+  /**
+   * An encoder's settings: what was set for it in Settings › Captures over its
+   * defaults. Never set yet: the old quality setting decides (a bitrate for
+   * "standard", else constant quality).
+   */
+  encoderSettings(id) {
+    const s = this.settings.data;
+    let own = (s.captureEnc || {})[id];
+    if (!own) {
+      const d = encoders.describe(id);
+      if (d && s.captureQuality === 'standard') {
+        const rc = d.rateControls.find((r) => r.value === 'CBR') || d.rateControls.find((r) => r.bitrate);
+        own = { rate_control: rc ? rc.value : d.defaults.rate_control, bitrate: Number(s.captureBitrate) || 20000 };
+      } else if (d && s.captureQuality === 'best') {
+        const q = d.rateControls.find((r) => r.value === d.defaults.rate_control).quality;
+        if (q) own = { [q]: Math.max(d.qualityMin, d.defaults[q] - 3) };
+      }
+    }
+    return encoders.settingsFor(id, own);
+  }
+
+  /** For Settings › Captures: what can be chosen, and what is in use. */
+  async encoderInfo() {
+    const { encoders: list, fromObs } = await this.encoderList();
+    const current = await this.encoder();
+    const s = this.settings.data;
+    return {
+      encoders: list.map((e) => ({ ...e, ...encoders.describe(e.id) })),
+      fromObs,
+      current,
+      codec: (encoders.BY_ID.get(current) || {}).codec || s.captureCodec || 'h264',
+      chosen: list.some((e) => e.id === s.captureEncoder) ? s.captureEncoder : 'auto',
+      settings: this.encoderSettings(current),
+    };
   }
 
   /**

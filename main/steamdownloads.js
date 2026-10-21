@@ -12,10 +12,18 @@
 //
 // Starting an update: Steam has no link for "update now" (its own button calls
 // an internal function), and steam://install does nothing for a game that is
-// installed. steam://validate does it: Steam checks the installed files, puts
-// the game first in its queue ("Priority First") and downloads the update, all
-// without a window. Steam only takes links once it is signed in, so when it
-// isn't running it is started in the tray first.
+// installed. Two ways do it:
+//  - The game's manifest says its update already started (StateFlags "update
+//    started"), and Steam (which reads manifests only when it starts) starts:
+//    it takes the update up at once, with no check of the game's files.
+//    A running Steam is restarted in the tray for it (~10 s, tested 2026-10-21).
+//  - steam://validate: Steam checks all the installed files first (minutes for
+//    a 30+ GB game), puts the game first in its queue and downloads the update.
+// The first is used for games of QUICK_UPDATE_MIN and more, or when Steam
+// isn't running anyway; validate for small games (a quick check beats a
+// restart) and while a game runs (closing Steam would close it). Steam only
+// takes links once it is signed in, so when it isn't running it is started in
+// the tray first.
 //
 // Installing a game the user owns (library entries with installed: false):
 // steam://install alone opens Steam's install dialog (which drive…). The
@@ -41,6 +49,9 @@ const { shell } = require('electron');
 const { parseVdf, getCI } = require('./vdf');
 const scanner = require('./scanner');
 const { appDetails, steamAccounts } = require('./steamowned');
+
+// A game this big (on disk) is updated by restarting Steam, not by validating it.
+const QUICK_UPDATE_MIN = 5 * 1024 ** 3;
 
 // EAppState bits used in StateFlags.
 const S = {
@@ -246,6 +257,7 @@ class SteamDownloads {
       toStage: n('BytesToStage'),
       staged: n('BytesStaged'),
       result: n('UpdateResult'),
+      onDisk: n('SizeOnDisk'),
       scheduled: n('ScheduledAutoUpdate') * 1000,
       buildId: String(getCI(s, 'buildid') || ''),
       targetBuild: String(getCI(s, 'TargetBuildID') || ''),
@@ -657,8 +669,10 @@ class SteamDownloads {
     this.publish(true);
     this.schedule();
     try {
-      await this.ensureSteam();
-      await this.quietly(() => this.steamUrl(`steam://validate/${appid}`));
+      if (!(await this.updateByRestart(appid))) {
+        await this.ensureSteam();
+        await this.quietly(() => this.steamUrl(`steam://validate/${appid}`));
+      }
     } catch (err) {
       this.requests.delete(appid);
       throw err;
@@ -668,6 +682,41 @@ class SteamDownloads {
     this.requests.set(appid, Date.now()); // Steam has START_TIMEOUT from now to take it up
     this.publish(true);
     return true;
+  }
+
+  /**
+   * Start an update without Steam checking the game's files: mark it started
+   * in its manifest while Steam is closed, then start Steam in the tray (see
+   * the top of this file). One restart at a time. False when validate is the
+   * better way (a small game with Steam running, a game running, no manifest).
+   */
+  updateByRestart(appid) {
+    const run = async () => {
+      await this.refreshManifests().catch(() => {});
+      const a = this.apps.get(appid);
+      if (!a || !(a.flags & S.installed) || this.monitor.list().length) return false;
+      if ((a.flags & S.updateRunning) !== 0) return true; // already going
+      const steamRunning = await this.steamProcess();
+      if (steamRunning && a.onDisk < QUICK_UPDATE_MIN) return false;
+      this.restartingSteam = steamRunning;
+      this.publish(true);
+      try {
+        await this.stopSteam(); // Steam writes its manifests as it closes: change them after
+        const text = await fsp.readFile(a.file, 'utf8');
+        const m = /("StateFlags"\s+")(\d+)(")/.exec(text);
+        if (!m) return false;
+        const flags = Number(m[2]) | S.updateStarted;
+        if (flags !== Number(m[2])) await fsp.writeFile(a.file, text.slice(0, m.index) + m[1] + flags + m[3] + text.slice(m.index + m[0].length), 'utf8');
+        await this.startSteam();
+        await this.readManifest(a.file);
+        return true;
+      } finally {
+        this.restartingSteam = false;
+      }
+    };
+    const next = (this.restartQueue || Promise.resolve()).then(run, run);
+    this.restartQueue = next.catch(() => {});
+    return next;
   }
 
   /**

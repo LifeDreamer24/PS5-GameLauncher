@@ -8,6 +8,7 @@ import { mountOverlay } from './overlay.js';
 import { startUpdate, startInstall } from './downloads.js';
 import { t } from '../i18n.js';
 import { deleteGame, offersDelete } from '../views/storage.js';
+import { pickImage, showGameLocation } from './filebrowser.js';
 
 let launching = false;
 
@@ -51,7 +52,11 @@ function watchGameShown(id) {
   return { promise, cancel: done };
 }
 
-export async function launchGame(game) {
+/**
+ * Start a game. from: the element it was started from (its cover, the Play
+ * Game button…): the launch screen fades in out of it.
+ */
+export async function launchGame(game, { from = null } = {}) {
   if (!game || launching) return;
   // Owned on Steam but not on this PC: download it instead.
   if (!isInstalled(game)) return startInstall(game);
@@ -90,6 +95,12 @@ Unsaved progress may be lost.`,
       h('div', { class: 'launch-status' }, h('div', { class: 'spinner' }), h('span', { text: t('Starting…') }))
     )
   );
+  // Where it comes from: the middle of what was pressed (else the screen's).
+  const r = from instanceof Element && from.isConnected ? from.getBoundingClientRect() : null;
+  const ox = r && r.width ? r.left + r.width / 2 : window.innerWidth / 2;
+  const oy = r && r.height ? r.top + r.height / 2 : window.innerHeight / 2;
+  el.style.setProperty('--lx', `${ox}px`);
+  el.style.setProperty('--ly', `${oy}px`);
   const app = document.getElementById('app');
   app.classList.add('launching');
   // The launch screen stays up until the game's window is on screen (the
@@ -123,7 +134,9 @@ Unsaved progress may be lost.`,
 
 async function changeArtwork(game, anchor) {
   const custom = (kind) => async () => {
-    const g = await api.customArt(game.id, kind);
+    const file = await pickImage('Choose an Image', 'art');
+    if (!file) return;
+    const g = await api.customArt(game.id, kind, file);
     if (g) pushNotification({ title: 'Artwork updated', body: game.name, icon: 'image', silent: false });
   };
   await optionsMenu({
@@ -166,7 +179,7 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
       : null,
     running
       ? { label: 'Continue', icon: 'play', run: () => continueGame(findGame(id) || game) }
-      : { label: 'Play', icon: 'play', run: () => launchGame(findGame(id) || game) },
+      : { label: 'Play', icon: 'play', run: () => launchGame(findGame(id) || game, { from: anchor }) },
     running ? { label: 'Close Game', icon: 'close', danger: true, run: () => closeRunningGame(findGame(id) || game) } : null,
     {
       label: game.favorite ? 'Remove from Favorites' : 'Add to Favorites',
@@ -174,8 +187,6 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
       run: () => api.updateGame(id, { favorite: !game.favorite }),
     },
     { label: 'Change Artwork', icon: 'image', submenu: true, run: () => changeArtwork(game, anchor) },
-    // Name, where it shows and its start arguments, in one place (keeps this menu short).
-    { label: 'Manage…', icon: 'sliders', submenu: true, run: () => manageGame(game, anchor) },
   ];
   const PAUSE_MODES = [
     { value: 'auto', label: 'Automatic', hint: 'Only while the game is offline' },
@@ -257,23 +268,10 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
     });
   }
   items.push(
-    { label: 'Open File Location', icon: 'folder', run: () => api.openLocation(id) },
-    // Uninstall: the game's files go (Steam's way for Steam games), see Settings › Storage.
-    offersDelete(game) ? { label: 'Delete', icon: 'trash', danger: true, run: () => deleteGame(findGame(id) || game) } : null,
-    {
-      label: 'Remove from Library',
-      icon: 'trash',
-      danger: true,
-      run: async () => {
-        const ok = await confirmDialog({
-          title: t('Remove {name}?', { name: game.name }),
-          message: 'It will be removed from the launcher and ignored by future scans. Your game files are not touched.\nYou can bring removed games back in Settings › Library.',
-          confirmLabel: 'Remove',
-          danger: true,
-        });
-        if (ok) await api.removeGame(id);
-      },
-    }
+    { label: 'Open File Location', icon: 'folder', run: () => showGameLocation(findGame(id) || game) },
+    // Name, where it shows, its start arguments and removing it, in one place
+    // at the bottom (keeps this menu short).
+    { label: 'Manage…', icon: 'sliders', submenu: true, run: () => manageGame(game, anchor) }
   );
   return optionsMenu({ title: game.name, anchor, items: items.filter(Boolean) });
 }
@@ -292,31 +290,18 @@ function notInstalledOptions(game, anchor, dl) {
         run: () => api.updateGame(id, { favorite: !game.favorite }),
       },
       { label: 'Change Artwork', icon: 'image', submenu: true, run: () => changeArtwork(game, anchor) },
-      { label: 'Manage…', icon: 'sliders', submenu: true, run: () => manageGame(game, anchor) },
       { label: 'View in Steam Store', icon: 'steam', run: () => api.openExternal(`steam://store/${game.steamAppId}`) },
-      {
-        label: 'Remove from Library',
-        icon: 'trash',
-        danger: true,
-        run: async () => {
-          const ok = await confirmDialog({
-            title: t('Remove {name}?', { name: game.name }),
-            message: 'It will be removed from the launcher and ignored by future scans. You still own it on Steam.\nYou can bring removed games back in Settings › Library.',
-            confirmLabel: 'Remove',
-            danger: true,
-          });
-          if (ok) await api.removeGame(id);
-        },
-      },
+      { label: 'Manage…', icon: 'sliders', submenu: true, run: () => manageGame(game, anchor) },
     ].filter(Boolean),
   });
 }
 
-/** Options › Manage…: Rename, Move to Media, Hide from Home, Launch Options. */
+/** Options › Manage…: Rename, Move to Media, Hide from Home, Launch Options, Delete, Remove from Library. */
 async function manageGame(game, anchor) {
   const id = game.id;
+  const installed = isInstalled(game);
   const canDirect = !!(game.direct && game.direct.target) || (game.source === 'steam' && !!game.installDir);
-  const hasArgs = isInstalled(game) && game.launch && (game.launch.type === 'exe' || game.launch.type === 'steam' || canDirect);
+  const hasArgs = installed && game.launch && (game.launch.type === 'exe' || game.launch.type === 'steam' || canDirect);
   await optionsMenu({
     title: 'Manage',
     anchor,
@@ -350,6 +335,24 @@ async function manageGame(game, anchor) {
             },
           }
         : null,
+      // Uninstall: the game's files go (Steam's way for Steam games), see Settings › Storage.
+      installed && offersDelete(game) ? { label: 'Delete', icon: 'trash', danger: true, run: () => deleteGame(findGame(id) || game) } : null,
+      {
+        label: 'Remove from Library',
+        icon: 'trash',
+        danger: true,
+        run: async () => {
+          const ok = await confirmDialog({
+            title: t('Remove {name}?', { name: game.name }),
+            message: installed
+              ? 'It will be removed from the launcher and ignored by future scans. Your game files are not touched.\nYou can bring removed games back in Settings › Library.'
+              : 'It will be removed from the launcher and ignored by future scans. You still own it on Steam.\nYou can bring removed games back in Settings › Library.',
+            confirmLabel: 'Remove',
+            danger: true,
+          });
+          if (ok) await api.removeGame(id);
+        },
+      },
     ].filter(Boolean),
   });
 }

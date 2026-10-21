@@ -16,6 +16,7 @@ import { optionsMenu } from '../ui/dialogs.js';
 import { avatarHtml } from '../ui/avatar.js';
 import { sys, watchMedia, pollMedia, appName } from '../system.js';
 import { t } from '../i18n.js';
+import { addGameFolder } from '../ui/filebrowser.js';
 
 const BIG = 16.8;
 const SMALL = 10.6;
@@ -390,7 +391,8 @@ export class HomeView {
     const el = this.tileEls.get(it.key);
     replayClass(el?.firstElementChild, 'press');
     // A game: what its main button says (Play Game, Continue, or Update when one is waiting).
-    if (it.type === 'game') this.hub.item && this.hub.item.key === it.key ? this.hub.activateAction(0) : launchGame(it.game);
+    // Started from its cover: the launch screen comes out of the cover.
+    if (it.type === 'game') this.hub.item && this.hub.item.key === it.key ? this.hub.activateAction(0, el) : launchGame(it.game, { from: el });
     else if (it.type === 'library' || it.type === 'media-empty') {
       sfx.select();
       this.router.open('library', { tab: this.tab === 'media' ? 'media' : 'game' });
@@ -399,7 +401,7 @@ export class HomeView {
       api.openExternal('steam://store');
     } else if (it.type === 'add') {
       sfx.select();
-      api.addFolder();
+      addGameFolder();
     }
   }
 

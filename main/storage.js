@@ -21,8 +21,14 @@ const contains = (a, b) => {
   return y === x || y.startsWith(x + path.sep);
 };
 
-/** Bytes in a folder (files only; links and junctions aren't followed). */
+/** Bytes in a folder (files only; links and junctions aren't followed), or in one file. */
 async function folderSize(dir) {
+  try {
+    const st = await fsp.lstat(dir);
+    if (st.isFile()) return st.size;
+  } catch {
+    return 0;
+  }
   let total = 0;
   const stack = [dir];
   while (stack.length) {
@@ -103,6 +109,11 @@ class Storage {
     if (g.source === 'steam') {
       if (!g.installDir || path.basename(g.installDir).toLowerCase() === 'common' || !fs.existsSync(g.installDir)) return null;
       return { root: g.installDir, deletable: true };
+    }
+    // An emulated game is its ROM file (the emulator is shared, never deleted).
+    if (g.source === 'emulator') {
+      if (!g.path || !fs.existsSync(g.path)) return null;
+      return { root: g.path, deletable: true };
     }
     if (LAUNCHERS[g.source]) {
       if (!g.installDir || !fs.existsSync(g.installDir)) return null;

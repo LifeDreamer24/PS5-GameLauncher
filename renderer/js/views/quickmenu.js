@@ -37,6 +37,9 @@ import {
   setBrightness,
   loadNightLight,
   setNightLight,
+  loadHdr,
+  setHdr,
+  hdrDisplays,
   loadBluetooth,
   setBluetooth,
   connectDevice,
@@ -114,6 +117,7 @@ export class QuickMenu {
     on('outputs', () => this.ctl && this.refreshRows('sound'));
     on('brightness', () => this.ctl && this.panelIs('display') && this.rebuildPanel());
     on('nightlight', () => this.ctl && this.panelIs('display') && this.rebuildPanel());
+    on('hdr', () => this.ctl && this.panelIs('display') && this.rebuildPanel());
     on('bluetooth', () => this.ctl && this.panelIs('bluetooth') && this.rebuildPanel());
     on('discord', () => {
       if (!this.ctl) return;
@@ -129,10 +133,10 @@ export class QuickMenu {
     else this.open();
   }
 
-  close() {
+  close({ quiet = false } = {}) {
     if (!this.ctl) return;
     if (this.customizing) this.exitCustomize({ quiet: true });
-    sfx.menuOut();
+    if (!quiet) sfx.menuOut();
     // Close anything stacked above us first.
     let o = topOverlay();
     while (o && o !== this.ctl) {
@@ -475,6 +479,7 @@ export class QuickMenu {
     // Warm up the slower panels so they usually open fully populated.
     loadBluetooth();
     loadNightLight();
+    loadHdr();
     if (sys.displays === null) loadBrightness();
 
     this.cardRow = h('div', { class: 'qm-cards' });
@@ -1265,6 +1270,16 @@ export class QuickMenu {
     } else {
       rows.push({ icon: 'sun', label: 'Brightness', sub: 'Turn on DDC/CI in your monitor menu', value: 'Not supported' });
     }
+    const hdr = hdrDisplays();
+    for (const d of hdr) {
+      rows.push({
+        type: 'toggle',
+        icon: 'display',
+        label: hdr.length > 1 ? `HDR · ${d.name || `Display ${d.index + 1}`}` : 'HDR',
+        value: () => !!(sys.hdr[d.index] && sys.hdr[d.index].on),
+        toggle: () => setHdr(d.index, !(sys.hdr[d.index] && sys.hdr[d.index].on)),
+      });
+    }
     if (sys.nightLight !== null) {
       rows.push({ type: 'toggle', icon: 'nightLight', label: 'Night Light', value: () => !!sys.nightLight, toggle: () => setNightLight(!sys.nightLight) });
     }
@@ -1288,6 +1303,7 @@ export class QuickMenu {
       onOpen: () => {
         if (sys.displays === null) loadBrightness();
         loadNightLight();
+        loadHdr();
       },
     };
   }
