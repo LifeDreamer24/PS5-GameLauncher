@@ -700,9 +700,11 @@
   --fx-gap: 0.42rem;
   --fx-w: 0.26rem;
   --glint: 0.5;
+  --qm-indicator-shift: 0rem;
 }
 
 .qm-btn.focused {
+  --qm-indicator-shift: calc(0.9rem + var(--fx-gap) + var(--fx-w) + 0.45rem);
   background: radial-gradient(circle at 50% 30%, #ffffff 0%, #e6e7ea 55%, #c9cbd0 100%);
   color: #16181d;
   box-shadow: 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
@@ -713,17 +715,23 @@
   position: relative;
 }
 
-.qm-btn.active .qm-ic::after {
-  content: "";
+.qm-active-dot {
   position: absolute;
   left: 50%;
-  /* Place the dot below the button’s outer focus ring. */
-  top: calc(50% + 3.3rem + var(--fx-gap) + var(--fx-w) + 0.45rem);
+  top: calc(50% + 2.4rem);
   width: 0.7rem;
   height: 0.7rem;
   margin-left: -0.35rem;
   border-radius: 50%;
   background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(var(--qm-indicator-shift));
+  transition: transform 0.25s var(--ease-out), opacity 0.2s var(--ease);
+}
+
+.qm-btn.active .qm-active-dot {
+  opacity: 1;
 }
 
 .qm-badge {
@@ -1530,12 +1538,13 @@
   opacity: 0;
 }
 
-/* Keep the complete online count below the Social button and its focus ring. */
+/* Keep the count near the glyph, then slide it clear of the focus ring. */
 .qm-online {
   position: absolute;
   left: 50%;
-  top: calc(100% + 2.6rem);
-  transform: translateX(-50%);
+  top: calc(50% + 2.4rem);
+  transform: translate(-50%, var(--qm-indicator-shift));
+  transition: transform 0.25s var(--ease-out), top 0.25s var(--ease-out);
   white-space: nowrap;
   line-height: 1;
   display: flex;
@@ -1545,6 +1554,11 @@
   font-weight: 600;
   color: #fff;
   pointer-events: none;
+}
+
+.qm-party.active .qm-online {
+  /* Leave a separate row for the active-panel dot. */
+  top: calc(50% + 3.8rem);
 }
 
 .qm-online:empty {
