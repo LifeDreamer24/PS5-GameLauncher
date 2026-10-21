@@ -418,11 +418,13 @@ html.windowed .boot {
   to { --ring-a: -360deg; }
 }
 
+/* Give the idle shine time to fade at both ends of its sweep.
+   At 5.2 s per cycle, the fades last 520 ms in and 624 ms out. */
 @keyframes glint {
   0% { opacity: 0; background-position: 100% 100%; }
-  3% { opacity: 1; }
-  18% { opacity: 1; }
-  22% { opacity: 0; background-position: 0% 0%; }
+  10% { opacity: 1; }
+  22% { opacity: 1; }
+  34% { opacity: 0; background-position: 0% 0%; }
   100% { opacity: 0; background-position: 0% 0%; }
 }
 
