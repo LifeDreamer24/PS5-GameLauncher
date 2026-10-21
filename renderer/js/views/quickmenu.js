@@ -223,6 +223,7 @@ export class QuickMenu {
         },
         h('span', { class: 'qm-label', text: t(it.label) }),
         h('span', { class: `qm-ic${it.game ? ' qm-game-ic' : ''}`, html: ic }),
+        h('span', { class: 'qm-active-dot', 'aria-hidden': 'true' }),
         it.id === 'notifications' ? h('span', { class: 'qm-badge' }) : null,
         it.id === 'music' ? h('span', { class: 'qm-eq', html: '<i></i><i></i><i></i>' }) : null,
         it.id === 'party' ? h('span', { class: 'qm-live' }) : null,
