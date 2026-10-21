@@ -61,6 +61,10 @@ contextBridge.exposeInMainWorld('api', {
 
   searchSteam: invoke('steam:search'),
 
+  updateState: invoke('update:state'),
+  updateCheck: invoke('update:check'),
+  updateDownload: invoke('update:download'),
+  updateInstall: invoke('update:install'),
   steamFriends: invoke('steamfriends:get'),
   steamFriendsSetKey: invoke('steamfriends:setKey'),
   steamFriendsForget: invoke('steamfriends:forget'),
@@ -122,7 +126,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'steamfriends:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'capture:saved', 'app:sleep', 'downloads:state'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'steamfriends:state', 'update:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'capture:saved', 'app:sleep', 'downloads:state'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

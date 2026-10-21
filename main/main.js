@@ -11,6 +11,7 @@ const { searchSteam } = require('./metadata');
 const { SystemBridge } = require('./system');
 const { DiscordBridge } = require('./discord');
 const { SteamFriends } = require('./steamfriends');
+const { Updater } = require('./updater');
 const { OverlayManager } = require('./overlay');
 const { GameMonitor } = require('./gamemonitor');
 const { SoundPacks } = require('./soundpacks');
@@ -59,6 +60,7 @@ const DEFAULT_SETTINGS = {
   prompts: 'auto',
   vibration: true,
   // System
+  autoUpdateCheck: true,
   launchAtStartup: false,
   onLaunch: 'minimize',
   overlay: true,
@@ -203,6 +205,7 @@ function start() {
   const system = new SystemBridge();
   const discord = new DiscordBridge({ file: path.join(dataDir, 'discord.json'), send });
   const steamFriends = new SteamFriends({ file: path.join(dataDir, 'steamfriends.json'), send, system });
+  const updater = new Updater({ send, settings });
   const obs = new ObsBridge({ dataDir, settings, send, system, defaultDir: () => path.join(app.getPath('videos'), 'PS5 Game Launcher') });
   overlay = new OverlayManager({
     system,
@@ -672,6 +675,7 @@ function start() {
     applyPassthrough();
     discord.start();
     setTimeout(() => steamFriends.start(), 4000);
+    updater.start();
     overlay.create();
     monitor.start();
     setTimeout(() => downloads.start().catch((err) => console.warn('[downloads]', err)), 2500);
@@ -706,6 +710,7 @@ function start() {
     system.stop();
     discord.close();
     steamFriends.stop();
+    updater.stop();
     settings.saveNow();
     libStore.saveNow();
     app.quit();
@@ -1243,6 +1248,10 @@ function start() {
   ipcMain.handle('bt:scan', (_e, action) => system.bluetoothScan(action));
 
   // Discord party (voice) controls
+  ipcMain.handle('update:state', () => updater.publicState());
+  ipcMain.handle('update:check', () => updater.check());
+  ipcMain.handle('update:download', () => updater.download());
+  ipcMain.handle('update:install', () => updater.install(() => app.quit()));
   ipcMain.handle('steamfriends:get', (_e, opts) => steamFriends.get(opts || {}));
   ipcMain.handle('steamfriends:setKey', (_e, data) => steamFriends.setKey(data || {}));
   ipcMain.handle('steamfriends:forget', () => steamFriends.forget());

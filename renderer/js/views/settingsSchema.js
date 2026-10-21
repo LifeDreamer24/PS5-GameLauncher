@@ -2,7 +2,8 @@
 
 import { api, state, refreshInfo, pushNotification, setSetting } from '../state.js';
 import { fmtBytes } from '../util.js';
-import { confirmDialog, optionsMenu } from '../ui/dialogs.js';
+import { confirmDialog, optionsMenu, infoDialog } from '../ui/dialogs.js';
+import { update, loadUpdate, checkUpdate, downloadUpdate, installUpdate, updateStatus } from '../updates.js';
 import { AVATARS } from '../ui/avatar.js';
 import { guideCategory } from './guide.js';
 import { openSoundStore } from './soundstore.js';
@@ -115,6 +116,63 @@ function discordItems() {
     label:
       'One-time setup: in the Discord Developer Portal create a New Application (any name). Under OAuth2, copy the Client ID and reset/copy the Client Secret, and add the redirect http://localhost. Enter both here and choose Connect — Discord asks you to authorize the launcher. Only you can use this application, which is what lets it control your voice.',
   });
+  return items;
+}
+
+/** Settings › System › Software Update: this launcher's updates from its GitHub Releases page. */
+function updateItems() {
+  const s = update.state;
+  const l = s && s.latest;
+  const busy = s && (s.status === 'checking' || s.status === 'downloading' || s.status === 'installing');
+  const items = [
+    { type: 'info', label: 'Current Version', value: (s && s.current) || state.info.version || '' },
+    {
+      type: 'action',
+      icon: 'refresh',
+      label: 'Check for Updates',
+      value: updateStatus(s),
+      valueClass: s && s.status === 'none' ? 'ok' : '',
+      disabled: !!busy,
+      run: () => checkUpdate(),
+    },
+  ];
+  if (l && (s.status === 'available' || s.status === 'downloading' || s.status === 'error')) {
+    items.push({
+      type: 'action',
+      icon: 'download',
+      label: s.installable ? t('Download and Install {v}', { v: l.version }) : t('Download {v} from GitHub', { v: l.version }),
+      value: l.size ? `${Math.round(l.size / 1048576)} MB` : '',
+      disabled: s.status === 'downloading',
+      run: () => downloadUpdate(),
+    });
+  }
+  if (s && s.status === 'ready') {
+    items.push({
+      type: 'action',
+      icon: 'restart',
+      label: 'Restart and Install',
+      run: async () => {
+        if (await confirmDialog({ title: t('Install {v}?', { v: l.version }), message: 'The launcher closes, installs the update and starts again. Your settings and library stay.', confirmLabel: 'Restart and Install' })) installUpdate();
+      },
+    });
+  }
+  if (l && l.notes) {
+    items.push({
+      type: 'action',
+      icon: 'info',
+      label: t('What’s New in {v}', { v: l.version }),
+      run: () => infoDialog({ title: l.name || l.version, html: l.notes.split('\n').map((line) => `<p>${line.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])}</p>`).join('') }),
+    });
+  }
+  items.push(
+    onOff('autoUpdateCheck', 'Check for Updates Automatically'),
+    {
+      type: 'note',
+      label: s && !s.installable
+        ? 'Updates come from the Releases page on GitHub. This copy runs from the zip, so a new version is downloaded from there and unpacked over it.'
+        : 'Updates come from the Releases page on GitHub. To install one, the launcher closes, the update installs in the background and the launcher starts again. Your settings, library and captures stay.',
+    }
+  );
   return items;
 }
 
@@ -945,6 +1003,7 @@ export function buildSchema(router) {
       icon: 'fSystem',
       desc: 'Startup and game launch behaviour',
       sections: [
+        { label: 'Software Update', items: updateItems, onEnter: () => loadUpdate() },
         {
           label: 'Language and Font',
           items: () => [

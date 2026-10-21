@@ -46,6 +46,7 @@ export class SettingsView {
     on('btscan', () => this.active && this.cat && this.cat.id === 'bluetooth' && rerender());
     on('discord', () => this.active && this.cat && this.cat.id === 'users' && rerender());
     on('steamfriends', () => this.active && this.cat && this.cat.id === 'users' && rerender());
+    on('update', () => this.active && this.cat && this.cat.id === 'system' && rerender());
   }
 
   build() {
