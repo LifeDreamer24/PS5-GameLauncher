@@ -185,7 +185,7 @@ export class QuickMenu {
       { id: 'library', icon: 'library', label: 'Game Library', run: () => (close(), this.router.open('library')) },
       { id: 'notifications', icon: 'bell', label: 'Notifications', panel: () => this.notificationsPanel() },
       // Friends, Party and Messages in one card, as the PS5's Game Base (id kept from "Party").
-      { id: 'party', icon: 'party', label: 'Game Base', panel: () => this.gameBasePanel() },
+      { id: 'party', icon: 'party', label: 'Social', panel: () => this.gameBasePanel() },
       { id: 'search', icon: 'search', label: 'Search', run: () => (close(), this.router.openSearch()) },
       { id: 'music', icon: 'music', label: 'Music', panel: () => this.musicPanel(), wide: true },
       { id: 'sound', icon: 'volume', label: 'Sound', panel: () => this.soundPanel() },

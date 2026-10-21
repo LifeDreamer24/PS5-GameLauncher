@@ -218,7 +218,7 @@ function steamFriendsItems() {
   items.push({
     type: 'note',
     label:
-      'One-time setup for the Friends list in the Game Base: open the Steam API Key page, sign in with your Steam account, register a key (any domain name, for example localhost) and copy it here, or paste it from the clipboard. The launcher only reads which friends are online and what they play with it; it is stored encrypted on this PC. Messages, joining and profiles open in Steam.',
+      'One-time setup for the Friends list in Social: open the Steam API Key page, sign in with your Steam account, register a key (any domain name, for example localhost) and copy it here, or paste it from the clipboard. The launcher only reads which friends are online and what they play with it; it is stored encrypted on this PC. Messages, joining and profiles open in Steam.',
   });
   return items.filter(Boolean);
 }

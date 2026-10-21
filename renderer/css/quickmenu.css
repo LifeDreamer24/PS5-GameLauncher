@@ -1295,7 +1295,8 @@
   display: grid;
   place-items: center;
   border-radius: 1.6rem;
-  color: rgba(255, 255, 255, 0.3);
+  /* Opaque grey keeps overlapping SVG pieces from showing seams. */
+  color: #626365;
   --fx-r: 1.6rem;
   transition: color 0.18s, background 0.18s;
 }
@@ -1528,11 +1529,14 @@
   opacity: 0;
 }
 
-/* Friends online, beside the Game Base icon in the bar ("● 4") */
+/* Keep the complete online count below the Social button and its focus ring. */
 .qm-online {
   position: absolute;
-  left: calc(100% - 1.2rem);
-  bottom: 0.2rem;
+  left: 50%;
+  top: calc(100% + 1.6rem);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  line-height: 1;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1542,7 +1546,12 @@
   pointer-events: none;
 }
 
+.qm-online:empty {
+  display: none;
+}
+
 .qm-online i {
+  flex: none;
   width: 1.1rem;
   height: 1.1rem;
   border-radius: 50%;
