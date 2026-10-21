@@ -1868,13 +1868,14 @@ export class QuickMenu {
           bump(this.barNav.current, action);
         }
       } else if (action === 'up') {
-        if (this.panel && this.panel.nav.els.length) {
-          this.zone = 'panel';
-          this.panel.nav.set(this.panel.nav.els.length - 1);
+        if (this.panel && this.panel.rail) {
+          // Return to the selected Social tab, without jumping to the last server.
+          this.zone = 'rail';
           sfx.move();
           this.applyFocus();
-        } else if (this.panel && this.panel.rail) {
-          this.zone = 'rail';
+        } else if (this.panel && this.panel.nav.els.length) {
+          this.zone = 'panel';
+          this.panel.nav.set(this.panel.nav.els.length - 1);
           sfx.move();
           this.applyFocus();
         } else if (!this.panel && this.cards.length) this.focus('cards', this.cardNav.index < 0 ? 0 : this.cardNav.index);

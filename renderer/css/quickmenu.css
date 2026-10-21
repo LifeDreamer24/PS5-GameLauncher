@@ -178,7 +178,7 @@
 
 .qm-bar-row {
   position: absolute;
-  bottom: 3.8rem;
+  bottom: 5rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -717,7 +717,8 @@
   content: "";
   position: absolute;
   left: 50%;
-  bottom: -2.9rem;
+  /* Place the dot below the button’s outer focus ring. */
+  top: calc(50% + 3.3rem + var(--fx-gap) + var(--fx-w) + 0.45rem);
   width: 0.7rem;
   height: 0.7rem;
   margin-left: -0.35rem;
@@ -1533,7 +1534,7 @@
 .qm-online {
   position: absolute;
   left: 50%;
-  top: calc(100% + 1.6rem);
+  top: calc(100% + 2.6rem);
   transform: translateX(-50%);
   white-space: nowrap;
   line-height: 1;
