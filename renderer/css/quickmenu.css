@@ -157,7 +157,7 @@
 
 .qm-bar-row {
   position: absolute;
-  bottom: 3.8rem;
+  bottom: 6rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -205,6 +205,8 @@
   transform: translate(-50%, 0);
 }
 
+/* Labels extend above the bar; fade them before its closing slide ends. */
+.qm.closing .qm-btn .qm-label,
 .qm.panel-open .qm-btn.focused .qm-label,
 .qm.panel-open .qm-btn .qm-label {
   opacity: 0;
@@ -229,7 +231,7 @@
 .qm-hints {
   position: absolute;
   right: 7rem;
-  bottom: 5.4rem;
+  bottom: 0.8rem;
   opacity: 0;
   transition: opacity 0.4s var(--ease) 0.15s;
   font-size: 1.8rem;
@@ -1036,7 +1038,7 @@
 
 .qm.customizing .qm-bar-row {
   gap: 2.2rem;
-  bottom: 4.6rem;
+  bottom: 6rem;
   align-items: flex-start;
 }
 
@@ -1100,7 +1102,7 @@
   stroke-width: 2.4;
 }
 
-/* Bottom-right "Customize" prompt, like the console */
+/* Reserve a separate footer line for hints, clear of even a full icon row. */
 .qm-hints {
   font-size: 2.6rem;
 }

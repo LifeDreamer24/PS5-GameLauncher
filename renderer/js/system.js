@@ -29,6 +29,9 @@ export const sys = {
 // only accept a reported position once the app has published a fresh one.
 const clock = { key: null, pos: 0, at: 0, playing: false, changedAt: 0 };
 let pending = null; // expected status after one of our own commands
+const playbackJobs = new Map(); // one serialized playback request per media app
+const PLAYBACK_COOLDOWN_MS = 500;
+const playbackAcceptedAt = new Map();
 
 function clockNow() {
   return clock.pos + (clock.playing ? (Date.now() - clock.at) / 1000 : 0);
@@ -70,11 +73,13 @@ export async function pollMedia() {
   if (polling) return sys.media;
   polling = true;
   try {
+    const pendingAtStart = pending;
     const st = await api.media(sys.mediaApp, sys.artKey);
     st.receivedAt = Date.now();
     // Our own play/pause may not have reached the app yet — keep showing it.
-    if (pending && st.active) {
-      if (Date.now() > pending.until || st.status === pending.status) pending = null;
+    if (pending && st.active && st.app === pending.app) {
+      // A poll started before a click cannot acknowledge that newer request.
+      if (!pending.sending && (Date.now() > pending.until || (pending === pendingAtStart && st.status === pending.status))) pending = null;
       else st.status = pending.status;
     }
     syncClock(st);
@@ -125,13 +130,17 @@ export async function mediaCommand(action, value) {
   const m = sys.media;
   if (!m || !m.active) return;
   if (action === 'toggle') {
+    const now = Date.now();
+    // Ignore extra clicks before changing either the UI/clock or native playback.
+    // Keep the guard active for slow requests too; ignored clicks are not queued.
+    if (playbackJobs.has(m.app) || now - (playbackAcceptedAt.get(m.app) ?? -Infinity) < PLAYBACK_COOLDOWN_MS) return;
+    playbackAcceptedAt.set(m.app, now);
     // Optimistic update so the button responds instantly; the clock simply
     // freezes / resumes where it is.
     m.status = m.status === 'Playing' ? 'Paused' : 'Playing';
-    const now = Date.now();
     Object.assign(clock, { pos: clockNow(), at: now, playing: m.status === 'Playing', changedAt: now });
-    pending = { status: m.status, until: now + 2500 };
     emit('media', m);
+    return requestPlayback(m);
   } else if (action === 'seek') {
     seekLocal(value);
   }
@@ -139,6 +148,42 @@ export async function mediaCommand(action, value) {
     await api.mediaCommand(m.app, action, value);
   } catch {}
   setTimeout(pollMedia, action === 'toggle' ? 400 : 700);
+}
+
+// Use explicit target states: repeated native toggles can race the app's
+// delayed status updates. While one request runs, retain only the latest intent.
+function requestPlayback(m) {
+  const request = { app: m.app, status: m.status, sending: true, until: Infinity };
+  pending = request;
+  const existing = playbackJobs.get(m.app);
+  if (existing) {
+    existing.request = request;
+    return existing.promise;
+  }
+  const job = { request };
+  playbackJobs.set(m.app, job);
+  job.promise = (async () => {
+    while (true) {
+      const sent = job.request;
+      let ok = false;
+      try {
+        ok = (await api.mediaCommand(sent.app, sent.status === 'Playing' ? 'play' : 'pause')) !== false;
+      } catch {}
+      if (job.request !== sent) continue;
+      if (pending === sent) {
+        if (ok) {
+          sent.sending = false;
+          sent.until = Date.now() + 2500;
+        } else {
+          pending = null;
+        }
+      }
+      playbackJobs.delete(sent.app);
+      setTimeout(pollMedia, ok ? 400 : 0);
+      return;
+    }
+  })();
+  return job.promise;
 }
 
 export function selectSession(appId) {

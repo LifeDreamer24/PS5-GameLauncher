@@ -189,7 +189,7 @@ export class HubPanel {
       h('div', { class: 'hub-desc', text: t(games.length === 1 ? '1 game' : '{n} games', { n: games.length }) + (media.length ? ` · ${t(media.length === 1 ? '1 media app' : '{n} media apps', { n: media.length })}` : '') + ` ${t('in your collection')}` })
     );
     this.actionDefs = [
-      { label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library') },
+      { label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library', { tab: 'game' }) },
       { label: 'Add Games', icon: 'plus', run: (el) => addGamesMenu(el) },
     ];
     const recent = sortGames(games, 'added').slice(0, 4);
@@ -204,7 +204,7 @@ export class HubPanel {
           wrap.append(row);
           return wrap;
         },
-        run: () => this.host.openView('library', { sort: 'added' }),
+        run: () => this.host.openView('library', { tab: 'game', sort: 'added' }),
       });
     }
     this.cardDefs.push(
@@ -287,6 +287,21 @@ export class HubPanel {
     if (!this.item || this.item.type !== 'nowplaying') return;
     const m = sys.media;
     if (!m || !m.active) return;
+    // Playback changes update existing controls so tab-entry animations keep running.
+    const playing = m.status === 'Playing';
+    const label = playing ? 'Pause' : 'Play';
+    const app = this.main.querySelector('.np-app');
+    if (app) app.textContent = `${appName(m.app)} · ${t(playing ? 'Now playing' : m.status || '')}`;
+    const action = this.actionDefs[0];
+    if (action) {
+      action.label = label;
+      action.icon = playing ? 'pause' : 'play';
+      const button = this.main.querySelector('.hub-actions .hub-btn.primary');
+      if (button && button.title !== t(label)) {
+        button.title = t(label);
+        button.innerHTML = `${icon(action.icon)}<span>${escapeHtml(t(label))}</span>`;
+      }
+    }
     const pos = mediaPosition();
     setSlider(this.main.querySelector('.np-bar'), m.duration > 0 ? (pos / m.duration) * 100 : 0);
     const t0 = this.main.querySelector('.np-t0');
@@ -303,7 +318,7 @@ export class HubPanel {
         text: t('Keep apps like music, video and streaming services here. Open the options menu on any entry and choose “Move to Media”.'),
       })
     );
-    this.actionDefs = [{ label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library', { tab: 'game' }) }];
+    this.actionDefs = [{ label: 'Open Library', icon: 'library', primary: true, run: () => this.host.openView('library', { tab: 'media' }) }];
     this.cardDefs = [];
   }
 

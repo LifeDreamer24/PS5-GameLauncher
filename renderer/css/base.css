@@ -263,7 +263,7 @@ html.windowed .boot {
   opacity: 1;
 }
 
-.hero-motion .hero-layer.show {
+.hero-motion .hero-layer.drifting {
   animation: heroDrift 18s var(--ease-out) both;
 }
 
@@ -286,7 +286,7 @@ html.windowed .boot {
   opacity: 1;
 }
 
-#hero-bg.blur-art .hero-layer {
+#hero-bg .hero-layer.blur-art {
   inset: -12%;
   background-position: center;
   filter: blur(5rem) saturate(1.6) brightness(0.62);
@@ -386,7 +386,7 @@ html.windowed .boot {
 
 .fx.focused::before,
 .focused > .fx::before,
-.fx.sel::before {
+.fx.sel:not(.tile)::before {
   opacity: 1;
   transform: none;
   /* 30 steps a second: the soft highlight looks the same, and the ring is
@@ -396,7 +396,7 @@ html.windowed .boot {
 
 .fx.focused::after,
 .focused > .fx::after,
-.fx.sel::after {
+.fx.sel:not(.tile)::after {
   animation: glint 5.2s var(--ease-in-out) 1.5s infinite;
 }
 

@@ -145,13 +145,13 @@ export class HomeView {
     return i >= 0 ? i : 0;
   }
 
-  refresh(force = false) {
-    const prevKey = this.items[this.sel] && this.items[this.sel].key;
+  refresh(force = false, { selectedKey = null, instantLayout = false } = {}) {
+    const prevKey = selectedKey ?? this.items[this.sel]?.key;
     const items = this.buildItems();
     const sig =
       items.map((i) => `${i.key}|${i.game ? `${i.game.artVersion}|${i.game.name}|${isRunning(i.game)}` : ''}`).join(',') +
       state.settings.tileStyle +
-      (this.tab === 'media' && sys.media && sys.media.active ? `|${sys.media.app}|${sys.media.key}|${sys.media.status}|${sys.artKey}` : '');
+      (this.tab === 'media' && sys.media && sys.media.active ? `|${sys.media.app}|${sys.media.key}|${sys.artKey}` : '');
     if (!force && sig === this.sig) {
       // Data may still have changed (playtime etc.) — refresh hub quietly.
       const cur = this.items[this.sel];
@@ -176,7 +176,7 @@ export class HomeView {
     if (idx < 0) idx = this.defaultIndex(items);
     this.sel = idx;
     this.renderTiles();
-    this.layout();
+    this.layout(instantLayout);
     this.updateTitle(false);
     const cur = this.items[this.sel];
     this.hub.setItem(cur, { animate: cur && cur.key !== this.hubKey });
@@ -211,10 +211,17 @@ export class HomeView {
         if (it.game && isRunning(it.game)) el.append(h('div', { class: 'tile-running' }));
         if (it.game && it.game.steamAppId) el.append(tileDownload(it.game));
         el._sig = sig;
+        el.addEventListener('mouseenter', () => {
+          if (mouseActive() && el._index === this.sel) this.focusZone('carousel', null, true);
+        });
         el.addEventListener('click', () => this.onTileClick(el));
       }
       el._index = i;
-      el.style.setProperty('--i', i);
+      // Media updates can rebuild this row during tab entry. Keep an existing
+      // tile's stagger intact; new tiles start relative to the current selection.
+      if (!this.carousel.classList.contains('tab-in') || !el.style.getPropertyValue('--i')) {
+        el.style.setProperty('--i', Math.abs(i - this.sel));
+      }
       keep.set(it.key, el);
       frag.append(el);
     });
@@ -229,15 +236,18 @@ export class HomeView {
       this.activateTile();
       return;
     }
-    this.focusZone('carousel');
-    this.select(i);
+    // A mouse click already animates the tile growing into selection.
+    // Don't add the controller-focus pop on top of that movement.
+    this.focusZone('carousel', null, true);
+    this.select(i, { pop: false });
   }
 
-  layout() {
+  layout(instant = false) {
     const k = SMALL / BIG;
     this.items.forEach((it, i) => {
       const el = this.tileEls.get(it.key);
       if (!el) return;
+      if (instant) el.style.transition = 'none';
       let x;
       let s = k;
       if (i === this.sel) {
@@ -250,6 +260,11 @@ export class HomeView {
       el.classList.toggle('off', x < -SMALL || x > 260);
       el.classList.toggle('before', i < this.sel);
     });
+    if (instant) {
+      // Commit final positions before playing the shared tab-entry animation.
+      void this.carousel.offsetWidth;
+      this.tileEls.forEach((el) => (el.style.transition = ''));
+    }
   }
 
   updateTitle(animate = true) {
@@ -288,7 +303,7 @@ export class HomeView {
   /* Focus                                                             */
   /* ---------------------------------------------------------------- */
 
-  select(i, { sound = true } = {}) {
+  select(i, { sound = true, pop = true } = {}) {
     if (i < 0 || i >= this.items.length || i === this.sel) return false;
     this.sel = i;
     this.selByTab[this.tab] = this.items[i].key;
@@ -299,6 +314,8 @@ export class HomeView {
     this.hub.setItem(cur);
     this.hubKey = cur.key;
     this.restoreFocusVisual();
+    // Only deliberate non-mouse selection changes get the focus pop.
+    if (pop && this.zone === 'carousel') replayClass(this.tileEls.get(cur.key)?.firstElementChild, 'pop');
     this.updateHeroSoon();
     return true;
   }
@@ -308,7 +325,8 @@ export class HomeView {
       sfx.bump();
       rumble(0.3);
       const el = this.tileEls.get(this.items[this.sel]?.key);
-      bump(el?.firstElementChild, d < 0 ? 'left' : 'right');
+      // Edge feedback moves the outer tile; inner pop/entry animations keep running.
+      bump(el, d < 0 ? 'left' : 'right');
     }
   }
 
@@ -321,6 +339,10 @@ export class HomeView {
     if (zone === 'cards' && index !== null) this.hub.cardNav.set(index);
     if (changed && !fromMouse) sfx.move();
     this.restoreFocusVisual();
+    // Pop only when returning focus with keyboard/controller, not on mouse clicks.
+    if (changed && zone === 'carousel' && !fromMouse) {
+      replayClass(this.tileEls.get(this.items[this.sel]?.key)?.firstElementChild, 'pop');
+    }
   }
 
   restoreFocusVisual() {
@@ -354,11 +376,14 @@ export class HomeView {
       this.sig = null;
       const want = this.selByTab[tab];
       this.items = [];
-      this.refresh(true);
-      const idx = want ? this.items.findIndex((i) => i.key === want) : -1;
-      if (idx >= 0 && idx !== this.sel) this.select(idx, { sound: false });
+      this.refresh(true, { selectedKey: want, instantLayout: true });
       this.carousel.classList.remove('switching');
       this.titleEl.classList.remove('switching');
+      // Stagger outward from the restored selection, not the start of the library.
+      // Snapshot the order here so moving selection mid-animation cannot retime it.
+      this.items.forEach((it, i) => {
+        this.tileEls.get(it.key)?.style.setProperty('--i', Math.abs(i - this.sel));
+      });
       replayClass(this.carousel, 'tab-in');
     }, 170);
   }
@@ -389,13 +414,16 @@ export class HomeView {
     const it = this.items[this.sel];
     if (!it) return;
     const el = this.tileEls.get(it.key);
-    replayClass(el?.firstElementChild, 'press');
+    const inner = el?.firstElementChild;
+    // The press must end at rest, not reveal a queued focus pop afterwards.
+    inner?.classList.remove('pop');
+    replayClass(inner, 'press');
     // A game: what its main button says (Play Game, Continue, or Update when one is waiting).
     // Started from its cover: the launch screen comes out of the cover.
     if (it.type === 'game') this.hub.item && this.hub.item.key === it.key ? this.hub.activateAction(0, el) : launchGame(it.game, { from: el });
     else if (it.type === 'library' || it.type === 'media-empty') {
       sfx.select();
-      this.router.open('library', { tab: this.tab === 'media' ? 'media' : 'game' });
+      this.router.open('library', { tab: it.type === 'media-empty' ? 'media' : 'game' });
     } else if (it.type === 'store') {
       sfx.select();
       api.openExternal('steam://store');
