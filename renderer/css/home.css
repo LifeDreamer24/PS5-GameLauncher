@@ -48,10 +48,6 @@
 }
 
 .tb-icon {
-  /* Establish the same transform layer before the first focus zoom. */
-  transform: scale(1);
-  transform-origin: center;
-  will-change: transform;
   flex-shrink: 0;
   width: 6rem;
   height: 6rem;
@@ -60,7 +56,7 @@
   place-items: center;
   font-size: 3.4rem;
   color: #fff;
-  transition: background 0.25s, box-shadow 0.25s, transform 0.25s var(--ease);
+  transition: background 0.25s, box-shadow 0.25s;
 }
 
 /* Selected icon inverts (light disc, dark glyph), like the quick menu. */
@@ -68,7 +64,6 @@
   background: radial-gradient(circle at 50% 30%, #ffffff 0%, #e6e7ea 55%, #c9cbd0 100%);
   color: #16181d;
   box-shadow: 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
-  transform: scale(1.06);
 }
 
 /* The profile picture keeps its own colours and gets the ring instead. */
@@ -832,6 +827,12 @@
 
 .tb-icon.focused {
   box-shadow: none;
+}
+
+/* Enlarge only the decorative ring. Scaling the button also resamples its
+   glyph/avatar, which can look like a pixel shift as focus changes. */
+.tb-icon.fx.focused::before {
+  transform: scale(1.06);
 }
 
 .tb-online {
