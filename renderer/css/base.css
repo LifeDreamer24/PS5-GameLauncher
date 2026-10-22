@@ -140,6 +140,11 @@ svg.ic {
   filter: brightness(0.42) blur(0.5rem) saturate(1.1);
 }
 
+/* Lighter background blur while the launcher control centre is present. */
+body:has(#overlays > .qm) #app.dimmed {
+  filter: brightness(0.42) blur(0.25rem) saturate(1.1);
+}
+
 /* Starting a game (see .launch-overlay): the page's buttons and text fade out
    while its background stays, as on the PS5. */
 #app.launching #views {
