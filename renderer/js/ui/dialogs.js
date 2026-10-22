@@ -132,7 +132,7 @@ export function optionsMenu({ title = '', items, anchor = null, index = 0, side 
  * The panel that opens beside the round sort button: "Sort by  Date", a line,
  * "Filters", filter rows and a "Reset Filters" button. It stays open while
  * choices are made (each row opens its own small menu) and closes with Back.
- * rows(): [{ type: 'value', label, value?: () => string, run(el) },
+ * rows(): [{ type: 'value', label, value?: () => string, run(el, close) },
  *          { type: 'divider' }, { type: 'header', label },
  *          { type: 'button', label, disabled?: () => bool, run() }]
  */
@@ -185,7 +185,7 @@ export function filterPanel({ anchor = null, rows }) {
       busy = true;
       sfx.select();
       try {
-        await el._def.run(el);
+        await el._def.run(el, close);
       } finally {
         busy = false;
       }

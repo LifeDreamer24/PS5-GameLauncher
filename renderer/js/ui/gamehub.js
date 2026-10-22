@@ -449,14 +449,14 @@ function shortAgo(ts) {
   return new Date(ts).toLocaleDateString(language(), { month: 'short', day: 'numeric' });
 }
 
-export async function addGamesMenu(anchor) {
+export async function addGamesMenu(anchor, beforeBrowse = () => {}) {
   const { optionsMenu } = await import('./dialogs.js');
   return optionsMenu({
     title: 'Add Games',
     anchor,
     items: [
-      { label: 'Add Game Folder…', icon: 'folderPlus', run: () => addGameFolder() },
-      { label: 'Add Games from Files…', icon: 'file', run: () => addGameFiles() },
+      { label: 'Add Game Folder…', icon: 'folderPlus', run: () => { beforeBrowse(); return addGameFolder(); } },
+      { label: 'Add Games from Files…', icon: 'file', run: () => { beforeBrowse(); return addGameFiles(); } },
       { label: 'Scan for Games Now', icon: 'refresh', run: () => api.scan() },
     ],
   });
