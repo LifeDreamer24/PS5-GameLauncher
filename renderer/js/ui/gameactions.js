@@ -344,7 +344,9 @@ async function manageGame(game, anchor) {
         run: async () => {
           const ok = await confirmDialog({
             title: t('Remove {name}?', { name: game.name }),
-            message: installed
+            message: game.source === 'manual'
+              ? 'It will be removed from the launcher. Your game files are not touched. You can add it again manually.'
+              : installed
               ? 'It will be removed from the launcher and ignored by future scans. Your game files are not touched.\nYou can bring removed games back in Settings › Library.'
               : 'It will be removed from the launcher and ignored by future scans. You still own it on Steam.\nYou can bring removed games back in Settings › Library.',
             confirmLabel: 'Remove',

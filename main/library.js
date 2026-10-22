@@ -504,7 +504,11 @@ class Library {
   remove(id) {
     const g = this.find(id);
     if (!g) return;
-    if (!this.store.data.excluded.includes(id)) this.store.data.excluded.push(id);
+    // Manually added entries are removed outright; only scanned games need
+    // an exclusion to prevent them from returning on the next scan.
+    if (g.source === 'manual') {
+      this.store.data.excluded = this.store.data.excluded.filter((x) => x !== id);
+    } else if (!this.store.data.excluded.includes(id)) this.store.data.excluded.push(id);
     this.store.data.games = this.games.filter((x) => x.id !== id);
     this.deleteArt(id);
     this.save();
