@@ -720,13 +720,6 @@ function start() {
   /* IPC                                                              */
   /* ---------------------------------------------------------------- */
 
-  // Only capture the launcher's own page, in memory, for its quick-menu backdrop.
-  ipcMain.handle('window:menuSnapshot', async (e) => {
-    if (!win || win.isDestroyed() || e.sender !== win.webContents) return null;
-    const frame = await e.sender.capturePage();
-    return frame.isEmpty() ? null : frame.toDataURL();
-  });
-
   ipcMain.handle('state:get', () => ({
     window: win ? { fullscreen: win.isFullScreen(), focused: win.isFocused() } : null,
     settings: settings.data,

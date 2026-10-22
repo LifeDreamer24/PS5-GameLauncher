@@ -6,7 +6,6 @@ const ctx = canvas.getContext('2d', { alpha: false });
 
 let mode = 'animated';
 let visible = true;
-let pausedAt = null;
 let raf = 0;
 let last = 0;
 let t0 = performance.now();
@@ -110,7 +109,7 @@ function drawFrame(now) {
 
 function step(now) {
   raf = 0;
-  if (!visible || pausedAt !== null || mode !== 'animated') return;
+  if (!visible || mode !== 'animated') return;
   const dt = Math.min(0.1, (now - last) / 1000);
   if (now - last >= 32) {
     for (const p of particles) {
@@ -125,7 +124,7 @@ function step(now) {
 }
 
 function kick() {
-  if (!raf && visible && pausedAt === null && mode === 'animated') {
+  if (!raf && visible && mode === 'animated') {
     last = performance.now();
     raf = requestAnimationFrame(step);
   }
@@ -142,18 +141,6 @@ export const background = {
     canvas.style.opacity = mode === 'off' ? '0' : '1';
     if (mode === 'static') drawFrame(performance.now());
     kick();
-  },
-  setPaused(paused) {
-    if (paused && pausedAt === null) {
-      pausedAt = performance.now();
-      cancelAnimationFrame(raf);
-      raf = 0;
-    } else if (!paused && pausedAt !== null) {
-      // Resume from the same scene time, without jumping ahead during the menu.
-      t0 += performance.now() - pausedAt;
-      pausedAt = null;
-      kick();
-    }
   },
   setVisible(v) {
     visible = v;

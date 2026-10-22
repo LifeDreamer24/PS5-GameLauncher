@@ -4,7 +4,6 @@ const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('api', {
   getState: invoke('state:get'),
-  menuSnapshot: invoke('window:menuSnapshot'),
   getInfo: invoke('info:get'),
   setSettings: invoke('settings:set'),
 

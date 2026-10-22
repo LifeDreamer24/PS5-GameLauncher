@@ -1,6 +1,5 @@
 // Control-centre style quick menu (Guide / PS button, Home or F1).
 
-import { freezeMenuBackground } from '../ui/menubackground.js';
 import { h, escapeHtml, clamp, timeAgo, bump } from '../util.js';
 import { icon } from '../icons.js';
 import { state, on, api, artUrl, sortGames, gamesIn, setSetting, lastActive, emit, currentGame, activeDownloads, findGame, isInstalled } from '../state.js';
@@ -155,16 +154,11 @@ export class QuickMenu {
   }
 
   toggle() {
-    if (this.ctl || this.opening) this.close();
+    if (this.ctl) this.close();
     else this.open();
   }
 
   close({ quiet = false } = {}) {
-    if (this.opening) {
-      this.opening = null;
-      this.menuBackground?.release(true);
-      this.menuBackground = null;
-    }
     if (!this.ctl) return;
     if (this.customizing) this.exitCustomize({ quiet: true });
     if (!quiet) sfx.menuOut();
@@ -523,17 +517,7 @@ export class QuickMenu {
     return (m && m.active ? `${m.app}|${m.key}|${m.status}|${sys.artKey}` : 'none') + '|' + p + '|' + activeDownloads().map((d) => d.appid).join(',') + '|' + (state.lastCapture ? state.lastCapture.time : '');
   }
 
-  async open() {
-    if (this.ctl || this.opening) return;
-    const opening = {};
-    this.opening = opening;
-    if (!this.overlay) {
-      const backdrop = freezeMenuBackground();
-      this.menuBackground = backdrop;
-      await backdrop.ready;
-      if (this.opening !== opening) return;
-    }
-    this.opening = null;
+  open() {
     sfx.menuIn();
     this.zone = 'bar';
     this.panel = null;
@@ -584,8 +568,6 @@ export class QuickMenu {
       dimApp: true,
       closeDelay: 380,
       onClose: () => {
-        this.menuBackground?.release();
-        this.menuBackground = null;
         this.ctl = null;
         clearInterval(this.ticker);
         clearInterval(this.friendsTicker);

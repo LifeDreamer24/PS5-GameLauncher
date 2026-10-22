@@ -21,7 +21,6 @@ import { initDualsense } from './dualsense.js';
 import { setLanguage, t, language } from './i18n.js';
 
 const viewsRoot = $('#views');
-on('menu-background-frozen', (paused) => background.setPaused(paused));
 
 /* ------------------------------------------------------------------ */
 /* Router                                                              */
