@@ -16,7 +16,7 @@
   background: #1e2027;
   box-shadow: 0 2.4rem 7rem rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
   opacity: 0;
-  transform: scale(0.96) translateY(-0.8rem);
+  transform: translateY(-0.8rem);
   transform-origin: top left;
   transition: opacity 0.2s var(--ease), transform 0.3s var(--ease-out);
 }
@@ -28,7 +28,7 @@
 
 .menu-overlay.closing .menu-panel {
   opacity: 0;
-  transform: scale(0.98);
+  transform: translateY(0.8rem);
   transition-duration: 0.16s;
 }
 
@@ -252,7 +252,6 @@
 .osk-key.focused {
   background: #fff;
   color: #111;
-  transform: scale(1.06);
   box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.4);
 }
 
@@ -975,14 +974,13 @@ body.reduce-motion .launch-overlay {
   text-align: left;
   border-radius: 1.6rem;
   background: rgba(24, 26, 33, 0.85);
-  transition: transform 0.3s var(--ease-out), background 0.2s;
+  transition: box-shadow 0.3s var(--ease-out), background 0.2s;
   --fx-r: 1.6rem;
   --glint: 0.16;
   animation: fadeUp 0.45s var(--ease-out) both;
 }
 
 .ss-card.focused {
-  transform: scale(1.03);
   background: rgba(40, 43, 54, 0.96);
 }
 
@@ -2051,4 +2049,11 @@ body[data-input="mouse"] .fb-crumb:hover {
 
 .fb-btn.disabled {
   opacity: 0.35;
+}
+
+.osk-key.focused {
+  box-shadow: 0 0 0 0.18rem #fff, 0 0.8rem 2rem rgba(0, 0, 0, 0.4);
+}
+.ss-card.focused {
+  box-shadow: 0 0 0 0.2rem rgba(40, 43, 54, 0.96);
 }
