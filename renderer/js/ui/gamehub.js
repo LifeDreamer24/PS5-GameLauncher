@@ -13,7 +13,7 @@ import { tileArt } from './tiles.js';
 import { sliderHtml, setSlider, dragSlider } from './slider.js';
 import { sys, mediaCommand, mediaPosition, seekLocal, selectSession, appName, fmtTime } from '../system.js';
 import { t, language } from '../i18n.js';
-import { ACTIVE, statusText, progressOf, fmtLeft, fmtSpeed, startUpdate, startInstall, pulsing } from './downloads.js';
+import { ACTIVE, statusText, progressOf, fmtLeft, fmtSpeed, fmtBits, startUpdate, startInstall, pulsing } from './downloads.js';
 
 export class HubPanel {
   /**
@@ -59,7 +59,7 @@ export class HubPanel {
     const bits = [];
     if (active && d.total) bits.push(`${Math.floor(progressOf(d) * 100)}%`);
     if (d.status === 'downloading') bits.push(fmtSpeed(d.speed), fmtLeft(d.eta));
-    if (!active && d.total) bits.push(t('{size} to download', { size: fmtBytes(d.total) }));
+    if (!active && d.total) bits.push(t('{size} to download', { size: fmtBits(d.total) }));
     el.querySelector('.hdl-info').textContent = bits.filter(Boolean).join(' · ');
     el.querySelector('.hdl-bar').style.display = active ? '' : 'none';
     el.querySelector('.hdl-bar').classList.toggle('pulse', pulsing(d));

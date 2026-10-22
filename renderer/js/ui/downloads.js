@@ -25,8 +25,21 @@ export function fmtLeft(sec) {
   return t('{h} h {m} min left', { h: Math.floor(m / 60), m: m % 60 });
 }
 
-export function fmtSpeed(bps) {
-  return bps > 0 ? `${fmtBytes(bps)}/s` : '';
+/** Format a download byte count using decimal bit units. */
+export function fmtBits(bytes) {
+  if (!(bytes > 0) || !Number.isFinite(bytes)) return '0 b';
+  const bits = bytes * 8;
+  const units = ['b', 'kb', 'Mb', 'Gb', 'Tb'];
+  const index = Math.min(Math.floor(Math.log10(bits) / 3), units.length - 1);
+  const value = bits / (1000 ** Math.max(0, index));
+  return `${value.toFixed(index > 0 ? 1 : 0)} ${units[Math.max(0, index)]}`;
+}
+
+/** Download speed arrives in bytes/s; display decimal megabits/s. */
+export function fmtSpeed(bytesPerSecond) {
+  if (!(bytesPerSecond > 0) || !Number.isFinite(bytesPerSecond)) return '';
+  const megabits = (bytesPerSecond * 8) / 1_000_000;
+  return `${megabits.toFixed(megabits < 1 ? 2 : 1)} Mb/s`;
 }
 
 /** What is happening, in a few words. */
@@ -67,11 +80,11 @@ export function progressOf(d) {
   return d.total > 0 ? Math.min(1, d.done / d.total) : 0;
 }
 
-/** "8.0 GB/23.3 GB (10 min left)" for the Downloads screen. */
+/** "8.0 Gb/23.3 Gb (10 min left)" for the Downloads screen. */
 export function sizeLine(d) {
   if (!d || !d.total) return '';
   const left = d.status === 'downloading' ? fmtLeft(d.eta) : '';
-  return `${fmtBytes(d.done)}/${fmtBytes(d.total)}${left ? ` (${left})` : ''}`;
+  return `${fmtBits(d.done)}/${fmtBits(d.total)}${left ? ` (${left})` : ''}`;
 }
 
 /** Ask Steam to update the game now. */
@@ -163,7 +176,7 @@ function installDialog(game, info) {
             h(
               'div',
               { class: 'id-sizes' },
-              info.download ? h('span', { html: `${escapeHtml(t('Download size'))} <b>${escapeHtml(fmtBytes(info.download))}</b>` }) : null,
+              info.download ? h('span', { html: `${escapeHtml(t('Download size'))} <b>${escapeHtml(fmtBits(info.download))}</b>` }) : null,
               info.size ? h('span', { html: `${escapeHtml(t('Space needed'))} <b>${escapeHtml(fmtBytes(info.size))}</b>` }) : null
             )
           )
