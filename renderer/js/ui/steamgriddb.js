@@ -1,152 +1,180 @@
+// Uses the Sound Themes browser's panel, tabs, cards and focus navigation.
 import { h } from '../util.js';
+import { icon } from '../icons.js';
 import { api, pushNotification } from '../state.js';
 import { sfx } from '../sound.js';
 import { mouseActive } from '../input.js';
 import { t } from '../i18n.js';
 import { mountOverlay, FocusList } from './overlay.js';
-import { optionsMenu, textDialog } from './dialogs.js';
+import { optionsMenu, textDialog, screenshotViewer } from './dialogs.js';
 import { renderHints } from './glyphs.js';
 
+const COLS = 4;
 const KINDS = [
-  { value: 'grid', label: 'Tile Image' },
-  { value: 'capsule', label: 'Portrait Cover' },
-  { value: 'hero', label: 'Background' },
-  { value: 'logo', label: 'Logo' },
+  { value: 'grid', label: 'Tiles' },
+  { value: 'capsule', label: 'Covers' },
+  { value: 'hero', label: 'Backgrounds' },
+  { value: 'logo', label: 'Logos' },
 ];
 
 export function steamGridDBPicker(game) {
   return new Promise(resolve => {
-    let term = game.name, selected = null, kind = 'grid', page = 0;
-    let busy = false, saving = false, editing = false, requestId = 0, items = [], controls = [];
-    const nav = new FocusList();
-    const toolbar = h('div', { class: 'sgdb-toolbar' });
-    const status = h('div', { class: 'sgdb-status', role: 'status', 'aria-live': 'polite' });
-    const list = h('div', { class: 'sgdb-results' });
-    const hints = h('div', { class: 'dlg-hints' });
-    renderHints(hints, [['confirm', 'Select'], ['back', 'Back']]);
-    const root = h('div', { class: 'overlay dialog-overlay' },
-      h('div', { class: 'dialog sgdb-dialog', role: 'dialog', 'aria-label': 'SteamGridDB' },
-        h('div', { class: 'dlg-title', text: 'SteamGridDB' }),
-        h('div', { class: 'dlg-msg', text: game.name }), toolbar, status, list, hints));
+    let term = game.name, selected = null, kind = 'grid';
+    let page = 0, items = [], loading = false, exhausted = false, error = '';
+    let generation = 0, busyId = null, editing = false;
+    const applied = new Map();
+    let nav = new FocusList([], { onChange: reveal });
+    const tabs = KINDS.map(k => h('button', { class: 'ss-tab', text: t(k.label), onclick: () => switchTab(k.value) }));
+    const status = h('div', { class: 'ss-status', role: 'status', 'aria-live': 'polite' });
+    const grid = h('div', { class: 'ss-grid' });
+    const scroller = h('div', { class: 'ss-scroll' }, grid);
+    const hints = h('div', { class: 'ss-hints' });
+    renderHints(hints, [['confirm', 'Select'], ['x', 'Search'], ['l1', 'Switch Tabs'], ['back', 'Close']]);
+    const retry = h('button', { class: 'ss-tab', text: t('Retry'), onclick: () => load(!items.length) });
+    const root = h('div', { class: 'overlay sound-store sgdb-store' },
+      h('div', { class: 'ss-panel', role: 'dialog', 'aria-label': 'SteamGridDB' },
+        h('div', { class: 'ss-head' }, h('div', { class: 'ss-title', text: 'SteamGridDB' }),
+          h('div', { class: 'ss-tabs' }, ...tabs), status),
+        scroller,
+        h('div', { class: 'ss-foot' },
+          h('div', { class: 'ss-credit', text: t('Artwork from the SteamGridDB community.') }),
+          h('div', { class: 'ss-tabs' },
+            h('button', { class: 'ss-tab', text: t('Search'), onclick: askSearch }), retry,
+            h('button', { class: 'ss-tab', text: t('Close'), onclick: close })), hints)));
     const ctl = mountOverlay(root, action => {
-      if (action === 'back') {
-        if (saving || editing) return true;
-        if (!busy && selected) { selected = null; load(); }
-        else close();
-      } else if (!busy && !editing) {
-        if (action === 'confirm') nav.current?.click();
-        else if (['left', 'right', 'up', 'down'].includes(action)) move(action);
+      if (action === 'back') close();
+      else if (busyId !== null || editing) return true;
+      else if (action === 'left' || action === 'right') {
+        nav.move(action === 'left' ? -1 : 1) ? sfx.move() : sfx.bump();
+      } else if (action === 'up' || action === 'down') {
+        const to = nav.index + (action === 'up' ? -COLS : COLS);
+        if (to >= 0 && to < nav.els.length && nav.set(to)) sfx.move();
+        else if (action === 'down' && nav.index < nav.els.length - 1 && nav.set(nav.els.length - 1)) sfx.move();
+        else { if (action === 'down') more(); sfx.bump(); }
+      } else if (action === 'confirm') {
+        if (!items.length && error) load(true);
+        else choose(nav.index);
+      } else if (action === 'x') askSearch();
+      else if (action === 'options' && error) load(!items.length);
+      else if (action === 'l1' || action === 'r1') {
+        const at = KINDS.findIndex(k => k.value === kind);
+        switchTab(KINDS[(at + (action === 'l1' ? -1 : 1) + KINDS.length) % KINDS.length].value);
       }
       return true;
-    }, { dimApp: true, onClose: () => { requestId++; resolve(); } });
+    }, { closeDelay: 320, onClose: () => { generation++; resolve(); } });
+    scroller.addEventListener('scroll', () => {
+      if (scroller.scrollTop + scroller.clientHeight > scroller.scrollHeight - 300) more();
+    });
 
-    function close() { sfx.back(); ctl.close(); }
-    function errorText(error) {
-      return String(error?.message || error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    function close() { if (busyId === null && !editing) { sfx.back(); ctl.close(); } }
+    function errorText(e) { return String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+    function reveal(el) {
+      if (!el) return;
+      const box = scroller.getBoundingClientRect(), r = el.getBoundingClientRect();
+      const top = r.top - box.top + scroller.scrollTop, bottom = top + r.height, pad = 28;
+      if (nav.index < COLS) scroller.scrollTo({ top: 0, behavior: 'smooth' });
+      else if (top < scroller.scrollTop + pad) scroller.scrollTo({ top: top - pad, behavior: 'smooth' });
+      else if (bottom > scroller.scrollTop + scroller.clientHeight - pad) scroller.scrollTo({ top: bottom - scroller.clientHeight + pad, behavior: 'smooth' });
+      if (nav.index >= items.length - COLS * 2) more();
     }
-    function focus(i) {
-      if (nav.set(i)) {
-        nav.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        sfx.move();
-      }
-    }
-    function move(action) {
-      const n = controls.length, i = nav.index, cols = selected ? 4 : 1;
-      let next = i;
-      if (i < n) {
-        if (action === 'left') next = Math.max(0, i - 1);
-        if (action === 'right') next = Math.min(n - 1, i + 1);
-        if (action === 'down' && items.length) next = n;
-      } else {
-        const at = i - n;
-        if (action === 'up') next = at < cols ? 0 : i - cols;
-        if (action === 'down' && at + cols < items.length) next = i + cols;
-        if (action === 'left' && at % cols > 0) next = i - 1;
-        if (action === 'right' && at % cols < cols - 1 && at + 1 < items.length) next = i + 1;
-      }
-      next === i ? sfx.bump() : focus(next);
-    }
-    function bind(el, i, run) {
-      el.addEventListener('mouseenter', () => { if (mouseActive() && !busy && !editing) nav.set(i); });
-      el.addEventListener('click', async () => {
-        if (busy || editing || ctl.closed) return;
-        nav.set(i);
-        sfx.select();
-        await run();
+    function updateStatus() {
+      tabs.forEach((b, i) => {
+        b.classList.toggle('active', KINDS[i].value === kind);
+        b.setAttribute('aria-pressed', String(KINDS[i].value === kind));
       });
+      status.textContent = error || (loading ? t('Loading…') : selected ? selected.name : `${t('Choose a game')} · ${term}`);
+      retry.hidden = !error;
+    }
+    function card(it, i) {
+      const image = h('div', { class: 'ss-img' });
+      if (selected) {
+        const img = h('img', { src: it.thumb, alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
+        img.addEventListener('error', () => { img.hidden = true; image.append(h('span', { html: icon('image') })); });
+        image.append(img);
+      } else image.append(h('span', { html: icon('gamepad') }));
+      const el = h('button', { class: 'ss-card fx' }, image,
+        h('div', { class: 'ss-name', text: selected ? it.author : it.name }),
+        h('div', { class: 'ss-meta' }, h('span', { text: selected ? `${it.width} × ${it.height}` : t('Browse artwork') })));
+      if (busyId === it.id) el.append(h('span', { class: 'ss-tag busy', text: t('Downloading…') }));
+      else if (selected && applied.get(kind) === it.id) el.append(h('span', { class: 'ss-tag on', text: t('In Use') }));
+      el.addEventListener('mouseenter', () => { if (mouseActive() && busyId === null && !editing) nav.set(i); });
+      el.addEventListener('click', () => { if (busyId === null && !editing) { nav.set(i); choose(i); } });
       return el;
     }
-    async function changeSearch() {
+    function render(keep = false, appendFrom = 0) {
+      const index = keep ? nav.index : 0;
+      if (!appendFrom) grid.replaceChildren();
+      grid.dataset.kind = selected ? kind : 'games';
+      // Append new pages without restarting the existing cards' animations.
+      const old = appendFrom ? nav.els : [];
+      const added = items.slice(appendFrom).map((it, i) => card(it, appendFrom + i));
+      grid.append(...added);
+      nav.blur();
+      nav = new FocusList([...old, ...added], { index: Math.max(0, index), onChange: reveal });
+      if (!loading && !items.length) grid.append(h('div', { class: 'ss-empty', text: error || t(selected ? 'No artwork found.' : 'No games found. Try another name.') }));
+      updateStatus();
+    }
+    async function load(reset) {
+      if (ctl.closed || busyId !== null || (!reset && (loading || exhausted || !selected))) return;
+      const token = reset ? ++generation : generation;
+      const nextPage = reset ? 0 : page + 1;
+      loading = true; error = '';
+      if (reset) { items = []; exhausted = false; scroller.scrollTop = 0; render(); }
+      else updateStatus();
+      try {
+        const result = selected ? await api.sgdbList(selected.id, kind, nextPage) : await api.sgdbSearch(term);
+        if (ctl.closed || token !== generation) return;
+        const oldLength = items.length;
+        const ids = new Set(items.map(it => it.id));
+        const fresh = result.filter(it => !ids.has(it.id));
+        items = items.concat(fresh); page = nextPage;
+        exhausted = !selected || !fresh.length;
+        loading = false;
+        render(!reset, reset ? 0 : oldLength);
+      } catch (e) {
+        if (ctl.closed || token !== generation) return;
+        loading = false; error = errorText(e);
+        if (!items.length) render(); else updateStatus();
+      }
+    }
+    function more() { if (!error && !editing && busyId === null) load(false); }
+    function switchTab(value) {
+      if (value === kind || busyId !== null || editing || ctl.closed) return;
+      kind = value; sfx.tab();
+      if (selected) load(true); else updateStatus();
+    }
+    async function askSearch() {
+      if (busyId !== null || editing || ctl.closed) return;
       editing = true;
       try {
         const value = await textDialog({ title: 'Search SteamGridDB', value: term });
-        if (value?.trim() && !ctl.closed) { term = value.trim(); selected = null; await load(); }
+        if (value?.trim() && !ctl.closed) { term = value.trim(); selected = null; load(true); }
       } finally { editing = false; }
     }
-    async function changeKind() {
+    async function choose(i) {
+      const it = items[i];
+      if (!it || busyId !== null || editing || ctl.closed) return;
+      sfx.select();
+      if (!selected) { selected = it; load(true); return; }
       editing = true;
+      const chosenKind = kind;
       try {
-        const choice = await optionsMenu({ title: 'Artwork Type', items: KINDS.map(k => ({ ...k, checked: kind === k.value })) });
-        if (choice && !ctl.closed) { kind = choice.value; page = 0; await load(); }
+        await optionsMenu({ title: it.author, anchor: nav.current, items: [
+          { label: 'Preview', icon: 'image', run: () => screenshotViewer([{ full: it.url }]) },
+          { label: 'Download and Use', icon: 'download', run: async () => {
+            busyId = it.id; render(true);
+            try {
+              await api.sgdbApply(game.id, chosenKind, it.id);
+              applied.set(chosenKind, it.id);
+              pushNotification({ title: 'Artwork updated', body: game.name, icon: 'image', silent: false });
+            } catch (e) {
+              sfx.error();
+              pushNotification({ title: "Couldn't download artwork", body: errorText(e), icon: 'info' });
+            } finally { busyId = null; if (!ctl.closed) render(true); }
+          } },
+        ] });
       } finally { editing = false; }
     }
-    function render() {
-      toolbar.replaceChildren(); list.replaceChildren();
-      const defs = [{ label: 'Search…', run: changeSearch }];
-      if (selected) {
-        defs.push({ label: KINDS.find(k => k.value === kind).label, run: changeKind });
-        defs.push({ label: 'Change Game', run: () => { selected = null; return load(); } });
-        if (page > 0) defs.push({ label: 'Previous Page', run: () => { page--; return load(); } });
-        // An empty next page remains navigable via Previous Page.
-        if (items.length) defs.push({ label: 'Next Page', run: () => { page++; return load(); } });
-      }
-      defs.push({ label: 'Retry', run: load }, { label: 'Close', run: close });
-      controls = defs.map((d, i) => bind(h('button', { class: 'sgdb-control fx', text: t(d.label) }), i, d.run));
-      toolbar.append(...controls);
-      list.classList.toggle('artwork', !!selected);
-      list.dataset.kind = kind;
-      const cards = items.map((item, i) => {
-        const el = h('button', { class: 'sgdb-card fx', 'aria-label': selected ? `${item.author}, ${item.width} × ${item.height}` : item.name });
-        if (selected) {
-          const img = h('img', { src: item.thumb, alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
-          img.addEventListener('error', () => { img.hidden = true; });
-          el.append(h('div', { class: 'sgdb-thumb' }, img), h('span', { text: `${item.width} × ${item.height} · ${item.author}` }));
-        } else el.append(h('span', { text: item.name }));
-        return bind(el, controls.length + i, async () => {
-          if (!selected) { selected = item; page = 0; await load(); return; }
-          busy = true; saving = true; status.textContent = t('Saving artwork…');
-          try {
-            await api.sgdbApply(game.id, kind, item.id);
-            pushNotification({ title: 'Artwork updated', body: game.name, icon: 'image', silent: false });
-            ctl.close();
-          } catch (error) { if (!ctl.closed) status.textContent = errorText(error); }
-          finally { busy = false; saving = false; }
-        });
-      });
-      list.append(...cards);
-      nav.setItems([...controls, ...cards], cards.length ? controls.length : 0);
-    }
-    async function load() {
-      const token = ++requestId;
-      busy = true; items = []; nav.setItems([]); list.replaceChildren(); toolbar.replaceChildren();
-      status.textContent = t('Loading…');
-      // Close stays available while remote requests are pending.
-      toolbar.append(h('button', { class: 'sgdb-control fx', text: t('Close'), onclick: close }));
-      try {
-        const result = selected ? await api.sgdbList(selected.id, kind, page) : await api.sgdbSearch(term);
-        if (ctl.closed || token !== requestId) return;
-        items = result;
-        status.textContent = selected
-          ? `${selected.name} · ${t(KINDS.find(k => k.value === kind).label)} · ${page + 1}${items.length ? '' : ' · ' + t('No artwork found.')}`
-          : `${term}${items.length ? '' : ' · ' + t('No games found. Try another name.')}`;
-      } catch (error) {
-        if (ctl.closed || token !== requestId) return;
-        status.textContent = errorText(error);
-      } finally {
-        if (!ctl.closed && token === requestId) { busy = false; render(); }
-      }
-    }
-    sfx.open();
-    load();
+    sfx.open(); load(true);
   });
 }
