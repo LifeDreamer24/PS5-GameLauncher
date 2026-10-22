@@ -178,7 +178,7 @@
 
 .qm-bar-row {
   position: absolute;
-  bottom: 5rem;
+  bottom: 3.8rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -954,6 +954,11 @@
 
 .qm.customizing .qm-batt {
   display: none !important;
+}
+
+/* No battery under it there, so the controller icon sits level with the others. */
+.qm.customizing .qm-accessories.has-batt .qm-ic {
+  transform: none;
 }
 
 /* Party card */

@@ -6,7 +6,11 @@ Built with Electron and plain HTML, CSS and JavaScript (no framework, no build s
 
 > Not affiliated with or endorsed by Sony Interactive Entertainment. "PlayStation" and "PS5" are trademarks of Sony Interactive Entertainment Inc. Game artwork belongs to its respective owners.
 
-<!-- Video: on github.com, edit this README and drag an .mp4 onto this line; GitHub uploads it and puts its link here. -->
+
+
+https://github.com/user-attachments/assets/b1225c41-ed9a-46b6-9e3b-d2af737d7b90
+
+
 
 ![Home screen](docs/screenshots/home.png)
 
