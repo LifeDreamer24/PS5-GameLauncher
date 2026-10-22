@@ -12,7 +12,7 @@ import { tileArt, specialArt } from '../ui/tiles.js';
 import { HubPanel } from '../ui/gamehub.js';
 import { tileDownload, updateTileDownloads } from '../ui/downloads.js';
 import { launchGame, gameOptions, isRunning } from '../ui/gameactions.js';
-import { optionsMenu } from '../ui/dialogs.js';
+import { optionsMenu, confirmDialog } from '../ui/dialogs.js';
 import { avatarHtml } from '../ui/avatar.js';
 import { sys, watchMedia, pollMedia, appName } from '../system.js';
 import { t } from '../i18n.js';
@@ -405,7 +405,15 @@ export class HomeView {
         { label: 'Profile Settings', icon: 'user', run: () => this.router.open('settings', { category: 'users' }) },
         { label: state.window.fullscreen ? 'Switch to Window' : 'Switch to Full Screen', icon: state.window.fullscreen ? 'minimize' : 'maximize', run: () => api.windowAction('toggleFullscreen') },
         { label: 'Minimize Launcher', icon: 'minimize', run: () => api.windowAction('minimize') },
-        { label: 'Exit Launcher', icon: 'exit', run: () => api.windowAction('close') },
+        {
+          label: 'Exit Launcher',
+          icon: 'exit',
+          run: async () => {
+            if (await confirmDialog({ title: 'Exit the launcher?', confirmLabel: 'Exit', danger: true })) {
+              await api.windowAction('close');
+            }
+          },
+        },
       ],
     });
   }
