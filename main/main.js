@@ -8,6 +8,7 @@ const { JsonStore } = require('./store');
 const { Library } = require('./library');
 const { launchGame } = require('./launcher');
 const { searchSteam } = require('./metadata');
+const sgdb = require('./sgdb');
 const { SystemBridge } = require('./system');
 const { DiscordBridge } = require('./discord');
 const { SteamFriends } = require('./steamfriends');
@@ -838,6 +839,9 @@ function start() {
     return g ? library.fetchMetadata([g], { force: true }) : null;
   });
   ipcMain.handle('game:setMatch', (_e, id, appid) => library.setMatch(id, appid));
+  ipcMain.handle('sgdb:search', (_e, term) => sgdb.search(settings.data.sgdbKey, term));
+  ipcMain.handle('sgdb:list', (_e, gameId, kind, page) => sgdb.list(settings.data.sgdbKey, gameId, kind, page));
+  ipcMain.handle('sgdb:apply', (_e, id, kind, artworkId) => library.setSteamGridDBArt(id, kind, artworkId));
   const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
   ipcMain.handle('game:customArt', async (_e, id, kind, file) => {
     if (!IMAGE.test(String(file)) || (await files.kind(file)) !== 'file') return null;
@@ -1341,3 +1345,4 @@ function start() {
     }
   });
 }
+

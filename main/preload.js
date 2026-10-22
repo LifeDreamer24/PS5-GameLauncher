@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('api', {
   refreshArt: invoke('game:refreshArt'),
   setMatch: invoke('game:setMatch'),
   customArt: invoke('game:customArt'),
+  sgdbSearch: invoke('sgdb:search'),
+  sgdbList: invoke('sgdb:list'),
+  sgdbApply: invoke('sgdb:apply'),
   gameLocation: invoke('game:location'),
   pickProfileImage: invoke('profile:pickImage'),
   removeProfileImage: invoke('profile:removeImage'),
@@ -135,3 +138,4 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener(channel, fn);
   },
 });
+
