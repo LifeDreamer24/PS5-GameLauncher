@@ -73,7 +73,7 @@ export function freezeMenuBackground() {
           // Explicit endpoints avoid coalesced CSS styles on rapid toggles.
           // Hold the still briefly so the resumed page can paint underneath.
           const speed = Number.parseFloat(getComputedStyle(app).getPropertyValue('--spd')) || 1;
-          const duration = 400 * speed;
+          const duration = 800 * speed;
           fade = image.animate(
             [{ opacity: 1 }, { opacity: 1, offset: 0.1 }, { opacity: 0 }],
             { duration, easing: 'ease-out', fill: 'forwards' },
