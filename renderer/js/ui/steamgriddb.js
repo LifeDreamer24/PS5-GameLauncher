@@ -29,7 +29,7 @@ export function steamGridDBPicker(game) {
     const grid = h('div', { class: 'ss-grid' });
     const scroller = h('div', { class: 'ss-scroll' }, grid);
     const hints = h('div', { class: 'ss-hints' });
-    renderHints(hints, [['confirm', 'Select'], ['x', 'Search'], ['l1', 'Switch Tabs'], ['back', 'Close']]);
+    renderHints(hints, [['confirm', 'Select'], ['x', 'Search'], [['l1', 'r1'], 'Switch Tabs'], ['back', 'Close']]);
     const retry = h('button', { class: 'ss-tab', text: t('Retry'), onclick: () => load(!items.length) });
     const root = h('div', { class: 'overlay sound-store sgdb-store' },
       h('div', { class: 'ss-panel', role: 'dialog', 'aria-label': 'SteamGridDB' },
@@ -38,9 +38,7 @@ export function steamGridDBPicker(game) {
         scroller,
         h('div', { class: 'ss-foot' },
           h('div', { class: 'ss-credit', text: t('Artwork from the SteamGridDB community.') }),
-          h('div', { class: 'ss-tabs' },
-            h('button', { class: 'ss-tab', text: t('Search'), onclick: askSearch }), retry,
-            h('button', { class: 'ss-tab', text: t('Close'), onclick: close })), hints)));
+          retry, hints)));
     const ctl = mountOverlay(root, action => {
       if (action === 'back') close();
       else if (busyId !== null || editing) return true;

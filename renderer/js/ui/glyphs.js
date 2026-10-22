@@ -81,7 +81,7 @@ export function glyph(action) {
 export function renderHints(el, list) {
   el._hints = list;
   el.classList.add('hints');
-  el.innerHTML = list.map(([action, label]) => `<span class="hint">${glyph(action)}<span>${t(label)}</span></span>`).join('');
+  el.innerHTML = list.map(([action, label]) => `<span class="hint">${Array.isArray(action) ? action.map(glyph).join('') : glyph(action)}<span>${t(label)}</span></span>`).join('');
 }
 
 function refreshAll() {
