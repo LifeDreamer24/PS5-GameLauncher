@@ -178,7 +178,8 @@
 
 .qm-bar-row {
   position: absolute;
-  bottom: 5rem;
+  /* Reserve space for the focused active dot and count/equalizer below it. */
+  bottom: 5.4rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
