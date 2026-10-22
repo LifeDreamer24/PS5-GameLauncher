@@ -885,6 +885,27 @@ export class QuickMenu {
     const put = (html) => {
       if (el._html !== html) {
         el._html = html;
+        // Playback updates can arrive during the press animation. Keep the
+        // button nodes alive while updating their icons and focus state.
+        if (r.type === 'buttons' && !r.search && el.querySelector('.qp-btns')) {
+          const template = document.createElement('template');
+          template.innerHTML = html;
+          const current = el.querySelectorAll('.qp-btn');
+          const next = template.content.querySelectorAll('.qp-btn');
+          if (current.length === next.length) {
+            current.forEach((btn, i) => {
+              const pressed = btn.classList.contains('pressed');
+              btn.className = next[i].className + (pressed ? ' pressed' : '');
+              btn.title = next[i].title;
+              if (btn.innerHTML !== next[i].innerHTML) btn.innerHTML = next[i].innerHTML;
+            });
+            const labels = el.querySelectorAll('.qp-btnlbl');
+            template.content.querySelectorAll('.qp-btnlbl').forEach((label, i) => {
+              if (labels[i]) labels[i].textContent = label.textContent;
+            });
+            return;
+          }
+        }
         el.innerHTML = html;
       }
     };
