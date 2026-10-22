@@ -207,6 +207,7 @@
   background: rgba(255, 255, 255, 0.16);
   box-shadow: 0 0 0 0.3rem #fff, 0 0 2.4rem rgba(255, 255, 255, 0.25);
   color: #fff;
+  transform: scale(1.06);
 }
 
 .qm-label {
@@ -289,12 +290,12 @@
 }
 
 @keyframes panelUp {
-  from { opacity: 0; transform: translateY(3rem); }
+  from { opacity: 0; transform: translateY(3rem) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
 
 @keyframes panelDown {
-  to { opacity: 0; transform: translateY(2rem); }
+  to { opacity: 0; transform: translateY(2rem) scale(0.98); }
 }
 
 .qp-head {
@@ -462,13 +463,14 @@
   background: #fff;
   color: #111;
   box-shadow: 0 0 0 0.3rem rgba(255, 255, 255, 0.35), 0 0.8rem 2.4rem rgba(0, 0, 0, 0.4);
+  transform: scale(1.06);
 }
 
 .qp-btn.disabled {
   opacity: 0.3;
 }
 
-.qp-btn.pressed::before {
+.qp-btn.pressed {
   animation: btnPress 0.28s var(--ease);
 }
 
@@ -715,6 +717,7 @@
   background: radial-gradient(circle at 50% 30%, #ffffff 0%, #e6e7ea 55%, #c9cbd0 100%);
   color: #16181d;
   box-shadow: 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
+  transform: scale(1.05);
 }
 
 .qm-btn .qm-ic {
@@ -1016,6 +1019,7 @@
 
 .qm-btn.qm-game.focused {
   background: none;
+  transform: scale(1.08);
 }
 
 .qm-card.playing .qc-img::after {
@@ -1771,17 +1775,4 @@
 /* The message sits on the black band, not under it. */
 .qm-custom-msg {
   z-index: 2;
-}
-
-.qm:not(.customizing) .qm-btn.focused:not(.qm-game) {
-  box-shadow: 0 0 0 0.18rem #c9cbd0, 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
-}
-.qp-btn.sel {
-  box-shadow: 0 0 0 0.2rem #fff, 0 0.8rem 2.4rem rgba(0, 0, 0, 0.4);
-}
-.qp-btn.sel.on {
-  box-shadow: 0 0 0 0.2rem #f2f3f5, 0 0.8rem 2.4rem rgba(0, 0, 0, 0.4);
-}
-.qp-btn.sel.danger {
-  box-shadow: 0 0 0 0.2rem #ef4444, 0 0.8rem 2.4rem rgba(0, 0, 0, 0.4);
 }

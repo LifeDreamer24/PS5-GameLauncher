@@ -89,6 +89,7 @@
 .lib-filter.focused {
   background: rgba(255, 255, 255, 0.9);
   color: #111;
+  transform: scale(1.04);
 }
 
 
@@ -1121,11 +1122,4 @@ body.ga-open .settings-view > :not(.set-bg) {
   text-align: center;
   font-size: 2.5rem;
   color: var(--text-2);
-}
-
-.lib-filter.focused {
-  box-shadow: 0 0 0 0.16rem rgba(255, 255, 255, 0.9);
-}
-.lib-filter.filtered.focused {
-  box-shadow: inset 0 0 0 0.25rem var(--blue), 0 0 0 0.16rem rgba(255, 255, 255, 0.9);
 }
