@@ -226,7 +226,6 @@ export class QuickMenu {
         h('span', { class: 'qm-active-dot', 'aria-hidden': 'true' }),
         it.id === 'notifications' ? h('span', { class: 'qm-badge' }) : null,
         it.id === 'music' ? h('span', { class: 'qm-eq', html: '<i></i><i></i><i></i>' }) : null,
-        it.id === 'party' ? h('span', { class: 'qm-live' }) : null,
         it.id === 'party' ? h('span', { class: 'qm-online' }) : null,
         it.id === 'accessories' ? h('span', { class: 'qm-batt', html: '<i></i>' }) : null,
         this.customizing && !FIXED.has(it.id) ? h('span', { class: `qm-check${hidden.has(it.id) ? '' : ' on'}`, html: icon('check') }) : null
@@ -593,11 +592,18 @@ export class QuickMenu {
   updatePartyIcon() {
     const b = this.el && this.el.querySelector('.qm-party');
     if (!b) return;
-    b.classList.toggle('live', inCall());
+    const connected = inCall();
+    const muted = !!(party.state?.voice?.mute || party.state?.voice?.deaf);
     // How many Steam friends are online, next to the icon (as the PS5 shows it).
     const n = onlineCount();
     const el = b.querySelector('.qm-online');
-    if (el) el.innerHTML = n ? `<i></i>${n}` : '';
+    if (el) {
+      const mic = connected
+        ? `<span class="qm-voice${muted ? ' muted' : ''}" role="img" aria-label="${escapeHtml(t(muted ? 'Microphone muted' : 'In voice chat'))}">${icon(muted ? 'micOff' : 'mic')}</span>`
+        : '';
+      const html = (n ? `<i></i>${n}` : '') + mic;
+      if (el.innerHTML !== html) el.innerHTML = html;
+    }
   }
 
   updateEq() {

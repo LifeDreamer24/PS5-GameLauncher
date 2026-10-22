@@ -881,22 +881,16 @@
   color: #d83c3e;
 }
 
-/* Live dot on the Party icon while in a call */
-.qm-live {
-  position: absolute;
-  right: 0.8rem;
-  bottom: 0.8rem;
-  width: 1.2rem;
-  height: 1.2rem;
-  border-radius: 50%;
-  background: #23a55a;
-  box-shadow: 0 0 0 0.22rem #0b0d12;
-  display: none;
+/* Voice-chat status shares the online count's position and slide animation. */
+.qm-online .qm-voice {
+  display: inline-flex;
+  align-items: center;
+  color: #34c66a;
+  margin-left: 0.3rem;
 }
-
-.qm-party.live .qm-live {
-  display: block;
-}
+.qm-online .qm-voice:first-child { margin-left: 0; }
+.qm-online .qm-voice svg { width: 1.8rem; height: 1.8rem; }
+.qm-online .qm-voice.muted { color: var(--text-3); }
 
 /* DualSense battery on the Accessories icon (PS5 control center style) */
 .qm-batt {
@@ -1139,7 +1133,6 @@
 }
 
 .qm.customizing .qm-badge,
-.qm.customizing .qm-live,
 .qm.customizing .qm-online,
 .qm.customizing .qm-eq {
   display: none !important;
