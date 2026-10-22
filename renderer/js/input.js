@@ -150,6 +150,14 @@ window.addEventListener('mousemove', () => {
   cursorTimer = setTimeout(() => document.body.classList.add('hide-cursor'), 3500);
 });
 
+// Wheel input is intentional even if the pointer hasn't moved since gamepad use.
+window.addEventListener('wheel', () => {
+  if (device !== 'mouse') setDevice('mouse');
+  document.body.classList.remove('hide-cursor');
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => document.body.classList.add('hide-cursor'), 3500);
+}, { passive: true, capture: true });
+
 window.addEventListener('mouseup', (e) => {
   if (e.button === 3) {
     e.preventDefault();

@@ -21,7 +21,7 @@ export async function openChat(conv) {
   const close = h('button', { class: 'dlg-btn fx', text: t('Close') });
   const hints = h('div', { class: 'chat-hints' });
   renderHints(hints, [
-    ['adjust', 'Scroll'],
+    ['scroll', 'Scroll'],
     ['confirm', 'Select'],
     ['back', 'Close'],
   ]);
