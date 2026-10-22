@@ -71,12 +71,12 @@ export function freezeMenuBackground() {
         if (immediate || document.body.classList.contains('reduce-motion')) remove();
         else {
           // Explicit endpoints avoid coalesced CSS styles on rapid toggles.
-          // Hold the still briefly so the resumed page can paint underneath.
+          // Ease gently into and out of the live scene, without a held first frame.
           const speed = Number.parseFloat(getComputedStyle(app).getPropertyValue('--spd')) || 1;
-          const duration = 800 * speed;
+          const duration = 400 * speed;
           fade = image.animate(
-            [{ opacity: 1 }, { opacity: 1, offset: 0.1 }, { opacity: 0 }],
-            { duration, easing: 'ease-out', fill: 'forwards' },
+            [{ opacity: 1 }, { opacity: 0 }],
+            { duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' },
           );
           fade.onfinish = remove;
           removal = setTimeout(remove, duration + 100);
