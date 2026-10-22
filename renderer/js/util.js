@@ -72,12 +72,11 @@ export function fmtDate(ts) {
 }
 
 export function fmtBytes(n) {
-  if (!(n > 0) || !Number.isFinite(n)) return '0 b';
-  n *= 8; // Stored sizes are bytes; display decimal bit units.
-  const u = ['b', 'kb', 'Mb', 'Gb', 'Tb'];
+  if (!n) return '0 MB';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0;
-  while (n >= 1000 && i < u.length - 1) {
-    n /= 1000;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
     i++;
   }
   return `${n.toFixed(n < 10 && i > 1 ? 1 : 0)} ${u[i]}`;

@@ -30,14 +30,13 @@ export async function loadStorage() {
   return state.storage;
 }
 
-/** Storage sizes in decimal bits, retaining the storage screen precision. */
+/** Sizes the way the PS5 writes them: 81.73 MB, 16.24 GB, 103.5 GB. */
 export function fmtSize(n) {
-  if (!(n > 0) || !Number.isFinite(n)) return '0 b';
-  n *= 8; // Stored sizes are bytes; display decimal bit units.
-  const u = ['b', 'kb', 'Mb', 'Gb', 'Tb'];
+  if (!n) return '0 KB';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0;
-  while (n >= 1000 && i < u.length - 1) {
-    n /= 1000;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
     i++;
   }
   return `${i < 2 ? Math.round(n) : n.toFixed(n >= 100 ? 1 : 2)} ${u[i]}`;
