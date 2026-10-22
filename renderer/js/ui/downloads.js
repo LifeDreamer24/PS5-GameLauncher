@@ -25,8 +25,11 @@ export function fmtLeft(sec) {
   return t('{h} h {m} min left', { h: Math.floor(m / 60), m: m % 60 });
 }
 
-export function fmtSpeed(bps) {
-  return bps > 0 ? `${fmtBytes(bps)}/s` : '';
+/** Download speed arrives in bytes/s; display decimal megabits/s. */
+export function fmtSpeed(bytesPerSecond) {
+  if (!(bytesPerSecond > 0) || !Number.isFinite(bytesPerSecond)) return '';
+  const megabits = (bytesPerSecond * 8) / 1_000_000;
+  return `${megabits.toFixed(megabits < 1 ? 2 : 1)} Mb/s`;
 }
 
 /** What is happening, in a few words. */
