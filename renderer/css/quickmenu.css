@@ -1142,6 +1142,7 @@
 
 .qm.customizing .qm-badge,
 .qm.customizing .qm-live,
+.qm.customizing .qm-online,
 .qm.customizing .qm-eq {
   display: none !important;
 }
