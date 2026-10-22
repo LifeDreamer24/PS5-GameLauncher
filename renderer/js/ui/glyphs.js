@@ -1,6 +1,6 @@
 // Controller button prompts that follow the last-used input device.
 
-import { getPromptStyle, getDevice } from '../input.js';
+import { getPromptStyle } from '../input.js';
 import { state, on } from '../state.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
@@ -15,8 +15,6 @@ const PS_SHAPES = {
 const ARROWS = `<span class="arrows">${icon('chevronLeft')}${icon('chevronRight')}</span>`;
 const DPAD = `<span class="arrows">${icon('chevronLeft')}${icon('chevronRight')}</span>`;
 
-const SCROLL_PAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/><path d="m10 7 2-2 2 2m-4 10 2 2 2-2"/></svg>';
-const SCROLL_MOUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="7"/><rect x="10" y="5" width="4" height="7" rx="2"/></svg>';
 
 const MAP = {
   xbox: {
@@ -32,7 +30,7 @@ const MAP = {
     l2: ['LT', ''],
     r2: ['RT', ''],
     adjust: [DPAD, 'kb'],
-    scroll: [SCROLL_PAD, 'round'],
+    scroll: ['LS', 'round scroll-stick'],
   },
   ps: {
     confirm: [PS_SHAPES.cross, 'round'],
@@ -47,7 +45,7 @@ const MAP = {
     l2: ['L2', ''],
     r2: ['R2', ''],
     adjust: [DPAD, 'kb'],
-    scroll: [SCROLL_PAD, 'round'],
+    scroll: ['L', 'round scroll-stick'],
   },
   keyboard: {
     confirm: ['Enter', 'kb'],
@@ -68,10 +66,14 @@ const MAP = {
 
 export function glyph(action) {
   const pref = state.settings.prompts;
-  if (action === 'scroll' && (!pref || pref === 'auto') && getDevice() === 'mouse') {
-    return `<span class="glyph round">${SCROLL_MOUSE}</span>`;
-  }
   const style = getPromptStyle(pref);
+  if (action === 'scroll') {
+    if (style !== 'ps' && style !== 'xbox') {
+      return '<span class="scroll-prompt"><span class="glyph kb scroll-key">↑</span><span class="glyph kb scroll-key">↓</span></span>';
+    }
+    const [label, cls] = MAP[style].scroll;
+    return `<span class="scroll-prompt"><span class="glyph ${cls}">${label}</span><span class="scroll-direction">↕</span></span>`;
+  }
   const [content, cls] = (MAP[style] || MAP.keyboard)[action] || ['?', 'kb'];
   return `<span class="glyph ${cls}">${content}</span>`;
 }
