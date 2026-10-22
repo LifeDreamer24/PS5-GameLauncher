@@ -3,7 +3,7 @@
 
 import { h, escapeHtml, bump, clamp } from '../util.js';
 import { icon } from '../icons.js';
-import { state, on, gamesIn, sortGames, api, sourceLabel, isInstalled } from '../state.js';
+import { state, on, gamesIn, sortGames, api, setSetting, sourceLabel, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
 import { rumble, mouseActive } from '../input.js';
 import { FocusList } from '../ui/overlay.js';
@@ -49,7 +49,7 @@ export class LibraryView {
     this.name = 'library';
     this.usesHero = false;
     this.tab = 'game';
-    this.sort = 'recent';
+    this.sort = SORTS.some((s) => s.value === state.settings.librarySort) ? state.settings.librarySort : 'recent';
     this.source = 'all';
     this.installFilter = 'all';
     this.zone = 'grid';
@@ -330,6 +330,7 @@ export class LibraryView {
             if (choice && choice.value !== this.sort) {
               this.sort = choice.value;
               this.render();
+              await setSetting('librarySort', this.sort);
             }
           },
         },
