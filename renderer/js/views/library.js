@@ -233,12 +233,29 @@ export class LibraryView {
     const row = Math.floor(this.gridNav.index / COLS);
     const rowH = el.offsetHeight + parseFloat(getComputedStyle(this.grid).rowGap || 0);
     const offset = Math.max(0, row - 1) * rowH;
+    this.loadArtworkNearRow(row, rowH);
     if (instant) this.grid.style.transition = 'none';
     this.grid.style.transform = `translateY(${-offset}px)`;
     this.el.classList.toggle('grid-scrolled', offset > 0);
     if (instant) {
       void this.grid.offsetWidth;
       this.grid.style.transition = '';
+    }
+  }
+
+  loadArtworkNearRow(row, rowH) {
+    if (rowH <= 0) return;
+    // The grid scrolls via transforms, not native scrolling. Start requests for
+    // its destination explicitly so lazy images cannot wait for a hover/repaint.
+    // Include one row on either side, without eagerly loading the whole library.
+    const firstVisible = Math.max(0, row - 1);
+    const visibleRows = Math.max(1, Math.ceil(this.gridWrap.clientHeight / rowH));
+    const start = Math.max(0, firstVisible - 1) * COLS;
+    const end = Math.min(this.tileEls.length, (firstVisible + visibleRows + 1) * COLS);
+    for (let i = start; i < end; i++) {
+      for (const image of this.tileEls[i].querySelectorAll('img[loading="lazy"]')) {
+        image.loading = 'eager';
+      }
     }
   }
 
