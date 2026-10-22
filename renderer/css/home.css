@@ -63,6 +63,7 @@
   background: radial-gradient(circle at 50% 30%, #ffffff 0%, #e6e7ea 55%, #c9cbd0 100%);
   color: #16181d;
   box-shadow: 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
+  transform: scale(1.06);
 }
 
 /* The profile picture keeps its own colours and gets the ring instead. */
@@ -430,7 +431,7 @@
 }
 
 @keyframes logoIn {
-  from { opacity: 0; transform: translateX(-3rem); }
+  from { opacity: 0; transform: translateX(-3rem) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
 
@@ -529,6 +530,7 @@
   background: #fff;
   color: #0b0c10;
   box-shadow: 0 0 0 0.32rem rgba(255, 255, 255, 0.45), 0 1rem 3rem rgba(0, 0, 0, 0.45);
+  transform: scale(1.04);
 }
 
 .hub-stats {
@@ -594,6 +596,7 @@
 
 .hub-card.focused {
   box-shadow: var(--ring);
+  transform: scale(1.02);
   background: rgba(36, 39, 48, 0.92);
 }
 
@@ -848,9 +851,10 @@
   box-shadow: 0 1.6rem 4rem rgba(0, 0, 0, 0.55);
 }
 
-/* Focus decoration grows independently of the label. */
+/* Its own layer, so the text doesn't snap a pixel down when the focus zoom ends. */
 .hub-btn {
   position: relative;
+  will-change: transform;
   --fx-r: 3.6rem;
   --fx-gap: 0.4rem;
   --glint: 0.22;
@@ -1045,15 +1049,4 @@
   place-items: center;
   font-size: 2rem;
   color: #fff;
-}
-
-/* Expand only the painted surface, keeping glyphs at their native size. */
-.tb-icon.focused:not(.tb-profile) {
-  box-shadow: 0 0 0 0.18rem #c9cbd0;
-}
-.hub-btn.focused {
-  box-shadow: 0 0 0 0.2rem #fff, 0 1rem 3rem rgba(0, 0, 0, 0.45);
-}
-.hub-card.focused {
-  box-shadow: 0 0 0 0.2rem rgba(36, 39, 48, 0.92);
 }

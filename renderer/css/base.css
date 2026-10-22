@@ -192,20 +192,20 @@ svg.ic {
 }
 
 @keyframes viewIn {
-  from { opacity: 0; transform: translateY(1rem); }
+  from { opacity: 0; transform: scale(1.035); }
   to { opacity: 1; transform: none; }
 }
 @keyframes viewOut {
   from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(-1rem); }
+  to { opacity: 0; transform: scale(0.975); }
 }
 @keyframes viewBackIn {
-  from { opacity: 0; transform: translateY(-1rem); }
+  from { opacity: 0; transform: scale(0.975); }
   to { opacity: 1; transform: none; }
 }
 @keyframes viewBackOut {
   from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(1rem); }
+  to { opacity: 0; transform: scale(1.035); }
 }
 
 /* Windowed mode: a slim title bar above the app (window buttons are native) */
@@ -856,11 +856,4 @@ body.reduce-motion .pulse > i::after {
 .scroll-direction {
   font-size: 2.6rem;
   line-height: 1;
-}
-
-/* Controls keep text/icons unscaled; only their focus decoration grows.
-   Tile artwork and its pop/press animations intentionally use their own rules. */
-:is(.tb-icon, .hub-btn, .hub-card, .qm-btn, .qp-btn, .osk-key, .ss-card, .lib-filter).fx.focused::before,
-.qp-btn.fx.sel::before {
-  transform: scale(1.035);
 }
