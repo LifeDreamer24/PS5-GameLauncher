@@ -758,8 +758,10 @@
   box-shadow: none;
 }
 
+/* Button rows use their individual controls for feedback, not a row-wide sweep. */
 .qp-row.t-buttons::before,
-.qp-row.t-buttons::after {
+.qp-row.t-buttons::after,
+.qp-row.t-buttons > .fx-wave {
   display: none;
 }
 
