@@ -48,6 +48,11 @@
 }
 
 .tb-icon {
+  /* Establish the same transform layer before the first focus zoom. */
+  transform: scale(1);
+  transform-origin: center;
+  will-change: transform;
+  flex-shrink: 0;
   width: 6rem;
   height: 6rem;
   border-radius: 50%;
