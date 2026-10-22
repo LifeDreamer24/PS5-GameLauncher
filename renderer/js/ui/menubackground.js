@@ -22,37 +22,72 @@ export function freezeMenuBackground() {
   let timeout = null;
   let fade = null;
   let removal = null;
+  let openingTimer = null;
   let finishWait;
   const cancelled = new Promise((resolve) => { finishWait = resolve; });
   const syncDim = () => image?.classList.toggle('dimmed', app.classList.contains('dimmed'));
   const onResize = () => controller.release(true);
+  const speed = () => Number.parseFloat(getComputedStyle(app).getPropertyValue('--spd')) || 1;
+  const cancelFade = () => {
+    clearTimeout(openingTimer);
+    if (fade) {
+      fade.onfinish = null;
+      fade.cancel();
+      fade = null;
+    }
+  };
+  const enter = (opacity = 0) => {
+    cancelFade();
+    const finish = () => {
+      if (released) return;
+      clearTimeout(openingTimer);
+      // Only stop the live scene once the still completely covers it.
+      app.classList.add('menu-freezing', 'menu-frozen');
+      emit('menu-background-frozen', true);
+    };
+    if (document.body.classList.contains('reduce-motion')) {
+      finish();
+      return;
+    }
+    fade = image.animate(
+      [{ opacity }, { opacity: 1 }],
+      { duration: 400 * speed(), easing: 'ease-in-out', fill: 'forwards' },
+    );
+    fade.onfinish = finish;
+    openingTimer = setTimeout(() => {
+      if (released) return;
+      cancelFade(); // The underlying image style is fully opaque.
+      finish();
+    }, 400 * speed() + 100);
+  };
   const controller = {
     ready: null,
     retain() {
       if (!released || !image || !image.isConnected) return false;
       clearTimeout(removal);
-      fade?.cancel();
-      fade = null;
+      const opacity = Number.parseFloat(getComputedStyle(image).opacity);
+      cancelFade();
       released = false;
       active = controller;
-      app.classList.add('menu-freezing', 'menu-frozen');
-      emit('menu-background-frozen', true);
       window.addEventListener('resize', onResize);
       observer.observe(app, { attributes: true, attributeFilter: ['class'] });
       syncDim();
+      enter(opacity);
       return true;
     },
     release(immediate = false) {
       if (released) {
         if (immediate) {
           clearTimeout(removal);
-          fade?.cancel();
+          cancelFade();
           image?.remove();
           if (active === controller) active = null;
         }
         return;
       }
+      const opacity = image ? Number.parseFloat(getComputedStyle(image).opacity) : 1;
       released = true;
+      cancelFade();
       clearTimeout(timeout);
       finishWait();
       window.removeEventListener('resize', onResize);
@@ -63,7 +98,7 @@ export function freezeMenuBackground() {
       observer?.disconnect();
       const remove = () => {
         clearTimeout(removal);
-        fade?.cancel();
+        cancelFade();
         image?.remove();
         if (active === controller) active = null;
       };
@@ -72,10 +107,9 @@ export function freezeMenuBackground() {
         else {
           // Explicit endpoints avoid coalesced CSS styles on rapid toggles.
           // Hold the still briefly so the resumed page can paint underneath.
-          const speed = Number.parseFloat(getComputedStyle(app).getPropertyValue('--spd')) || 1;
-          const duration = 400 * speed;
+          const duration = 400 * speed();
           fade = image.animate(
-            [{ opacity: 1 }, { opacity: 1, offset: 0.1 }, { opacity: 0 }],
+            [{ opacity }, { opacity, offset: 0.1 }, { opacity: 0 }],
             { duration, easing: 'ease-out', fill: 'forwards' },
           );
           fade.onfinish = remove;
@@ -86,8 +120,6 @@ export function freezeMenuBackground() {
     },
   };
   active = controller;
-  app.classList.add('menu-freezing');
-  emit('menu-background-frozen', true);
   window.addEventListener('resize', onResize);
 
   const capture = (async () => {
@@ -109,7 +141,8 @@ export function freezeMenuBackground() {
       observer = new MutationObserver(syncDim);
       observer.observe(app, { attributes: true, attributeFilter: ['class'] });
       syncDim();
-      app.classList.add('menu-frozen');
+      // Start the transition without delaying the quick menu's own opening.
+      enter();
     } catch {
       controller.release(true);
     }
