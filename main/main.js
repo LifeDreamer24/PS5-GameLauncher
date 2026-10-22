@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
   ambient: false,
   ambientVolume: 35,
   // Screen
+  hardwareAcceleration: true,
   fullscreen: true,
   uiScale: 100,
   reduceMotion: false,
@@ -190,6 +191,9 @@ function start() {
   const avatarDir = path.join(dataDir, 'avatars');
   const packs = new SoundPacks(path.join(dataDir, 'soundpacks'));
   const settings = new JsonStore(path.join(dataDir, 'settings.json'), DEFAULT_SETTINGS);
+  // Electron requires this before app readiness and before any windows exist.
+  // Enabling again uses Electron's default GPU acceleration on the next launch.
+  if (settings.data.hardwareAcceleration === false) app.disableHardwareAcceleration();
   const libStore = new JsonStore(path.join(dataDir, 'library.json'), { games: [], excluded: [] });
 
   /** @type {BrowserWindow | null} */
