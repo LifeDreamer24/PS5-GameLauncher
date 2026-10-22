@@ -25,8 +25,12 @@ export function fmtLeft(sec) {
   return t('{h} h {m} min left', { h: Math.floor(m / 60), m: m % 60 });
 }
 
-export function fmtSpeed(bps) {
-  return bps > 0 ? `${fmtBytes(bps)}/s` : '';
+/** Convert bytes/s to decimal network-speed units; sizes stay in bytes. */
+export function fmtSpeed(bytesPerSecond) {
+  if (!(bytesPerSecond > 0) || !Number.isFinite(bytesPerSecond)) return '';
+  const megabits = (bytesPerSecond * 8) / 1_000_000;
+  if (megabits >= 1000) return `${(megabits / 1000).toFixed(2)} Gb/s`;
+  return `${megabits.toFixed(megabits < 1 ? 2 : 1)} Mb/s`;
 }
 
 /** What is happening, in a few words. */
