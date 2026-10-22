@@ -9,6 +9,7 @@ import { startUpdate, startInstall } from './downloads.js';
 import { t } from '../i18n.js';
 import { deleteGame, offersDelete } from '../views/storage.js';
 import { pickImage, showGameLocation } from './filebrowser.js';
+import { steamGridDBPicker } from './steamgriddb.js';
 
 let launching = false;
 
@@ -143,6 +144,7 @@ async function changeArtwork(game, anchor) {
     title: 'Change Artwork',
     anchor,
     items: [
+      ...(state.settings.sgdbKey?.trim() ? [{ label: 'Choose from SteamGridDB…', icon: 'image', submenu: true, run: () => steamGridDBPicker(game) }] : []),
       {
         label: 'Find on Steam…',
         icon: 'search',
@@ -420,3 +422,4 @@ export async function pickPadEmulation(game, anchor) {
   game.padEmulation = choice.value;
   await api.updateGame(game.id, { padEmulation: choice.value });
 }
+
