@@ -1767,9 +1767,8 @@ body.reduce-motion .launch-overlay {
 }
 
 /* File browser (ui/filebrowser.js): the launcher's own, instead of Explorer -- */
-/* The page behind makes way; the theme background shows through. */
-body.fb-open #views,
-body.fb-open #hero-bg {
+/* Hide page controls while preserving the current background artwork. */
+body.fb-open #views {
   opacity: 0;
   transition: opacity 0.25s var(--ease);
 }
