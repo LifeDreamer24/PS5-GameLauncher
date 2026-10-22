@@ -923,6 +923,8 @@ export function buildSchema(router) {
               ? null
               : { type: 'toggle', icon: 'nightLight', label: 'Night Light', get: () => !!sys.nightLight, set: (v) => setNightLight(v) },
             onOff('fullscreen', 'Full Screen'),
+            onOff('hardwareAcceleration', 'Hardware Acceleration', 'Use GPU acceleration when available. Fully close and reopen the launcher after changing this setting.'),
+            { type: 'note', label: 'This does not select a GPU. To use your dedicated GPU, choose High performance for the launcher in Windows Graphics settings.' },
             {
               type: 'choice',
               key: 'uiScale',
