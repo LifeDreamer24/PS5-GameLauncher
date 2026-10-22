@@ -875,11 +875,8 @@ body.reduce-motion .pulse > i::after {
   pointer-events: none;
   z-index: 1;
   opacity: 1;
-  transition: filter calc(0.4s * var(--spd)) var(--ease), opacity 0.18s var(--ease);
+  transition: filter calc(0.4s * var(--spd)) var(--ease);
 }
 .menu-backdrop.dimmed {
   filter: brightness(0.42) blur(0.5rem) saturate(1.1);
-}
-.menu-backdrop.releasing {
-  opacity: 0;
 }
