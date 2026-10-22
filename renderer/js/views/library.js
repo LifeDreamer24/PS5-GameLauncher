@@ -140,6 +140,7 @@ export class LibraryView {
   }
 
   render(keep = false) {
+    clearTimeout(this.artworkTimer);
     const prevId = keep && this.games[this.gridIndex] ? this.games[this.gridIndex].id : null;
     const list = this.list();
     const sig = `${this.tab}|${this.sort}|${this.source}|${this.installFilter}|${state.settings.tileStyle}|` + list.map((g) => `${g.id}:${g.artVersion}:${g.name}:${g.favorite}:${isRunning(g)}:${isInstalled(g)}`).join(',');
@@ -233,7 +234,12 @@ export class LibraryView {
     const row = Math.floor(this.gridNav.index / COLS);
     const rowH = el.offsetHeight + parseFloat(getComputedStyle(this.grid).rowGap || 0);
     const offset = Math.max(0, row - 1) * rowH;
-    this.loadArtworkNearRow(row, rowH);
+    // Avoid eagerly starting downloads for every row passed during rapid input.
+    clearTimeout(this.artworkTimer);
+    if (instant) this.loadArtworkNearRow(row, rowH);
+    else this.artworkTimer = setTimeout(() => {
+      if (this.active) this.loadArtworkNearRow(row, rowH);
+    }, 140);
     if (instant) this.grid.style.transition = 'none';
     this.grid.style.transform = `translateY(${-offset}px)`;
     this.el.classList.toggle('grid-scrolled', offset > 0);
@@ -481,6 +487,7 @@ export class LibraryView {
   }
 
   hide() {
+    clearTimeout(this.artworkTimer);
     this.active = false;
   }
 }
