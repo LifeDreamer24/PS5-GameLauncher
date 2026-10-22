@@ -4,6 +4,8 @@ import { api, emit } from '../state.js';
 let active = null;
 
 export function freezeMenuBackground() {
+  // Reuse the still during the previous menu's closing animation.
+  if (active?.retain()) return active;
   active?.release(true);
   const app = document.getElementById('app');
   // A full-page capture must not include an existing dialog, toast, or a
@@ -18,15 +20,33 @@ export function freezeMenuBackground() {
   let image = null;
   let observer = null;
   let timeout = null;
+  let fade = null;
+  let removal = null;
   let finishWait;
   const cancelled = new Promise((resolve) => { finishWait = resolve; });
   const syncDim = () => image?.classList.toggle('dimmed', app.classList.contains('dimmed'));
   const onResize = () => controller.release(true);
   const controller = {
     ready: null,
+    retain() {
+      if (!released || !image || !image.isConnected) return false;
+      clearTimeout(removal);
+      fade?.cancel();
+      fade = null;
+      released = false;
+      active = controller;
+      app.classList.add('menu-freezing', 'menu-frozen');
+      emit('menu-background-frozen', true);
+      window.addEventListener('resize', onResize);
+      observer.observe(app, { attributes: true, attributeFilter: ['class'] });
+      syncDim();
+      return true;
+    },
     release(immediate = false) {
       if (released) {
         if (immediate) {
+          clearTimeout(removal);
+          fade?.cancel();
           image?.remove();
           if (active === controller) active = null;
         }
@@ -42,14 +62,24 @@ export function freezeMenuBackground() {
       syncDim();
       observer?.disconnect();
       const remove = () => {
+        clearTimeout(removal);
+        fade?.cancel();
         image?.remove();
         if (active === controller) active = null;
       };
       if (image) {
         if (immediate || document.body.classList.contains('reduce-motion')) remove();
         else {
-          image.classList.add('releasing');
-          setTimeout(remove, 220);
+          // Explicit endpoints avoid coalesced CSS styles on rapid toggles.
+          // Hold the still briefly so the resumed page can paint underneath.
+          const speed = Number.parseFloat(getComputedStyle(app).getPropertyValue('--spd')) || 1;
+          const duration = 400 * speed;
+          fade = image.animate(
+            [{ opacity: 1 }, { opacity: 1, offset: 0.1 }, { opacity: 0 }],
+            { duration, easing: 'ease-out', fill: 'forwards' },
+          );
+          fade.onfinish = remove;
+          removal = setTimeout(remove, duration + 100);
         }
       }
       if (!image) remove();
@@ -74,6 +104,8 @@ export function freezeMenuBackground() {
       image = still;
       // Do not show a blank background while capture/decode is pending.
       app.after(image);
+      // Commit the unfiltered frame before mountOverlay dims it.
+      void getComputedStyle(image).filter;
       observer = new MutationObserver(syncDim);
       observer.observe(app, { attributes: true, attributeFilter: ['class'] });
       syncDim();
@@ -83,7 +115,10 @@ export function freezeMenuBackground() {
     }
   })();
   // Opening must remain responsive even if capturing the page fails or stalls.
-  timeout = setTimeout(() => controller.release(true), 200);
+  timeout = setTimeout(() => {
+    console.warn('Quick-menu background capture timed out; using the live background.');
+    controller.release(true);
+  }, 1000);
   controller.ready = Promise.race([capture, cancelled]).then(() => clearTimeout(timeout));
   return controller;
 }
