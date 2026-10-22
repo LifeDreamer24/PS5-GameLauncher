@@ -394,7 +394,7 @@ export class LibraryView {
           },
         },
         { type: 'divider' },
-        { type: 'value', label: 'Add Games', run: (el) => addGamesMenu(el) },
+        { type: 'value', label: 'Add Games', run: (el, close) => addGamesMenu(el, close) },
       ],
     });
   }
