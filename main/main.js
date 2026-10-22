@@ -19,6 +19,7 @@ const { ObsBridge } = require('./obs');
 const { SteamDownloads } = require('./steamdownloads');
 const { Storage } = require('./storage');
 const files = require('./files');
+const { gpuPreference } = require('./gpu');
 const emulators = require('./emulators');
 
 const DEFAULT_SETTINGS = {
@@ -743,6 +744,9 @@ function start() {
       excluded: libStore.data.excluded.length,
     },
   }));
+
+  ipcMain.handle('gpu:getPreference', () => gpuPreference());
+  ipcMain.handle('gpu:setPreference', (_e, preference) => gpuPreference(preference));
 
   ipcMain.handle('settings:set', async (e, patch) => {
     const s = settings.data;

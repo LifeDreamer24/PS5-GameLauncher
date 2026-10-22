@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   getState: invoke('state:get'),
   getInfo: invoke('info:get'),
   setSettings: invoke('settings:set'),
+  getGpuPreference: invoke('gpu:getPreference'),
+  setGpuPreference: invoke('gpu:setPreference'),
 
   scan: invoke('library:scan'),
   refreshAll: invoke('library:refreshAll'),

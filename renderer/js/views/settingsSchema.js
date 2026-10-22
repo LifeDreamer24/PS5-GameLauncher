@@ -1,7 +1,7 @@
 // Declarative settings tree: categories → sections → items.
 
 import { api, state, refreshInfo, pushNotification, setSetting } from '../state.js';
-import { fmtBytes } from '../util.js';
+import { fmtBytes, escapeHtml } from '../util.js';
 import { confirmDialog, optionsMenu, infoDialog } from '../ui/dialogs.js';
 import { update, loadUpdate, checkUpdate, downloadUpdate, installUpdate, updateStatus } from '../updates.js';
 import { AVATARS } from '../ui/avatar.js';
@@ -45,6 +45,38 @@ import { steam, loadFriends, setFriendsKey, forgetFriendsKey } from '../steamfri
 import { t } from '../i18n.js';
 
 const onOff = (key, label, desc) => ({ type: 'toggle', key, label, desc });
+
+
+let gpuMenuBusy = false;
+async function chooseLauncherGpu(anchor) {
+  if (gpuMenuBusy) return;
+  gpuMenuBusy = true;
+  try {
+    const current = await api.getGpuPreference();
+    if (!current.supported) {
+      await infoDialog({ title: 'Launcher GPU', html: 'GPU preference selection is available on Windows only.' });
+      return;
+    }
+    const choice = await optionsMenu({
+      title: 'Launcher GPU',
+      anchor,
+      index: current.preference,
+      items: ['Let Windows decide', 'Power saving', 'High performance'].map((label, id) => ({
+        id, label, checked: id === current.preference,
+      })),
+    });
+    if (!choice || choice.id === current.preference) return;
+    await api.setGpuPreference(choice.id);
+    await infoDialog({
+      title: 'GPU preference saved',
+      html: 'Fully close and reopen the launcher to apply this change. Keep Hardware Acceleration enabled to use GPU rendering. This setting applies to the launcher, not your games.',
+    });
+  } catch (error) {
+    await infoDialog({ title: 'Could not change GPU preference', html: escapeHtml(error.message || String(error)) });
+  } finally {
+    gpuMenuBusy = false;
+  }
+}
 
 function deviceMenu(d, anchor) {
   const items = [];
@@ -924,7 +956,8 @@ export function buildSchema(router) {
               : { type: 'toggle', icon: 'nightLight', label: 'Night Light', get: () => !!sys.nightLight, set: (v) => setNightLight(v) },
             onOff('fullscreen', 'Full Screen'),
             onOff('hardwareAcceleration', 'Hardware Acceleration', 'Use GPU acceleration when available. Fully close and reopen the launcher after changing this setting.'),
-            { type: 'note', label: 'This does not select a GPU. To use your dedicated GPU, choose High performance for the launcher in Windows Graphics settings.' },
+            { type: 'action', label: 'Launcher GPU', run: chooseLauncherGpu },
+            { type: 'note', label: 'Fully close and reopen the launcher after changing Hardware Acceleration or Launcher GPU. Windows selects the adapter for each GPU preference.' },
             {
               type: 'choice',
               key: 'uiScale',
