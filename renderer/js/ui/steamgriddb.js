@@ -1,5 +1,5 @@
 // Uses the Sound Themes browser's panel, tabs, cards and focus navigation.
-import { h } from '../util.js';
+import { h, escapeHtml } from '../util.js';
 import { icon } from '../icons.js';
 import { api, pushNotification } from '../state.js';
 import { sfx } from '../sound.js';
@@ -17,9 +17,11 @@ const KINDS = [
   { value: 'logo', label: 'Logos' },
 ];
 
-export function steamGridDBPicker(game) {
+export async function steamGridDBPicker(game) {
+  const initial = await chooseSteamGridDBGame(game.name);
+  if (!initial) return;
   return new Promise(resolve => {
-    let term = game.name, selected = null, kind = 'grid';
+    let term = game.name, selected = initial, kind = 'grid';
     let page = 0, items = [], loading = false, exhausted = false, error = '';
     let generation = 0, busyId = null, editing = false;
     const applied = new Map();
@@ -145,8 +147,8 @@ export function steamGridDBPicker(game) {
       if (busyId !== null || editing || ctl.closed) return;
       editing = true;
       try {
-        const value = await textDialog({ title: 'Search SteamGridDB', value: term });
-        if (value?.trim() && !ctl.closed) { term = value.trim(); selected = null; load(true); }
+        const choice = await chooseSteamGridDBGame(term);
+        if (choice && !ctl.closed) { selected = choice; term = choice.name; load(true); }
       } finally { editing = false; }
     }
     async function choose(i) {
@@ -174,5 +176,128 @@ export function steamGridDBPicker(game) {
       } finally { editing = false; }
     }
     sfx.open(); load(true);
+  });
+}
+
+/** Use the same dialog and result rows as Find on Steam. */
+function chooseSteamGridDBGame(name) {
+  return new Promise(resolve => {
+    let term = name, generation = 0, editing = false;
+    let nav = new FocusList([]);
+    const list = h('div', { class: 'match-list' });
+    const termEl = h('div', { class: 'match-term' });
+    const root = h('div', { class: 'overlay dialog-overlay' },
+      h('div', { class: 'dialog match-dialog' },
+        h('div', { class: 'dlg-title', text: t('Choose from SteamGridDB') }),
+        h('div', { class: 'dlg-msg', text: t('Pick the game that matches this entry to browse its artwork.') }),
+        termEl, list));
+    const ctl = mountOverlay(root, action => {
+      if (editing) return true;
+      if (action === 'up' || action === 'down') {
+        nav.move(action === 'up' ? -1 : 1) ? sfx.move() : sfx.bump();
+      } else if (action === 'confirm') pick(nav.index);
+      else if (action === 'back') { sfx.back(); ctl.close(); }
+      return true;
+    }, { dimApp: true, onClose: () => { generation++; resolve(null); } });
+
+    async function search() {
+      const token = ++generation;
+      termEl.innerHTML = `${icon('search')}<span>${escapeHtml(term)}</span>`;
+      nav = new FocusList([]);
+      list.innerHTML = '<div class="match-loading"><div class="spinner"></div></div>';
+      let results = [], error = '';
+      try { results = await api.sgdbSearch(term); }
+      catch (e) { error = String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+      if (ctl.closed || token !== generation) return;
+      const rows = [
+        { kind: 'search', label: 'Search for a different name…', icon: 'search' },
+        ...results.map(result => ({ ...result, kind: 'result' })),
+        ...(error ? [{ kind: 'retry', label: 'Retry', icon: 'refresh' }] : []),
+      ];
+      const els = rows.map((row, i) => {
+        const el = h('button', {
+          class: `match-row fx fx-in ${row.kind}`,
+          html: row.kind === 'result'
+            ? `<span class="mr-ic">${icon('gamepad')}</span><span class="mr-name">${escapeHtml(row.name)}</span><span class="mr-id">${escapeHtml(String(row.id))}</span>`
+            : `<span class="mr-ic">${icon(row.icon)}</span><span class="mr-name">${escapeHtml(t(row.label))}</span>`,
+          onmouseenter: () => mouseActive() && !editing && nav.set(i),
+          onclick: () => pick(i),
+        });
+        el._row = row;
+        return el;
+      });
+      list.replaceChildren(...els);
+      if (!results.length) list.append(h('div', { class: 'match-empty', text: error || t('No games found. Try another name.') }));
+      nav = new FocusList(els, { index: results.length ? 1 : 0,
+        onChange: el => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) });
+      loadThumbnails(els.filter(el => el._row.kind === 'result'), token);
+
+    }
+
+
+    async function loadThumbnails(els, token) {
+      const current = () => !ctl.closed && token === generation;
+      const steamSearches = new Map();
+      const normalize = value => String(value).normalize('NFKC').trim().toLowerCase();
+      async function steamImage(row) {
+        const key = normalize(row.name);
+        if (!steamSearches.has(key)) {
+          steamSearches.set(key, api.searchSteam(row.name).catch(() => []));
+        }
+        const matches = (await steamSearches.get(key)).filter(result => normalize(result.name) === key && result.image);
+        // Avoid guessing between distinct Steam games with the same title.
+        return matches.length === 1 ? matches[0].image : null;
+      }
+      async function show(el) {
+        const row = el._row;
+        async function gridImage() {
+          try {
+            const art = await api.sgdbList(row.id, 'hero', 0);
+            return art[0]?.thumb || art[0]?.url;
+          } catch { return null; }
+        }
+        let url = await steamImage(row);
+        if (!current()) return;
+        let usingGrid = !url;
+        if (!url) url = await gridImage();
+        if (!url || !current()) return;
+        const placeholder = el.querySelector('.mr-ic');
+        const img = h('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
+        img.addEventListener('load', () => {
+          if (current() && placeholder.parentNode === el) placeholder.replaceWith(img);
+        });
+        img.addEventListener('error', async () => {
+          if (usingGrid || !current()) return;
+          usingGrid = true;
+          const fallback = await gridImage();
+          if (fallback && current()) img.src = fallback;
+        });
+        img.src = url;
+      }
+      // Keep the chooser usable immediately and limit artwork requests.
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(3, els.length) }, async () => {
+        while (current() && next < els.length) await show(els[next++]);
+      }));
+    }
+
+    async function pick(i) {
+      const row = nav.els[i]?._row;
+      if (!row || editing || ctl.closed) return;
+      sfx.select();
+      if (row.kind === 'retry') { search(); return; }
+      if (row.kind === 'search') {
+        editing = true;
+        try {
+          const value = await textDialog({ title: 'Search SteamGridDB', value: term });
+          if (value?.trim() && !ctl.closed) { term = value.trim(); search(); }
+        } finally { editing = false; }
+        return;
+      }
+      resolve({ id: row.id, name: row.name });
+      ctl.close();
+    }
+    sfx.open();
+    search();
   });
 }
