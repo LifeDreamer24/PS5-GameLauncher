@@ -250,14 +250,16 @@ function chooseSteamGridDBGame(name) {
       }
       async function show(el) {
         const row = el._row;
-        let url = null;
-        try {
-          const art = await api.sgdbList(row.id, 'hero', 0);
-          url = art[0]?.thumb || art[0]?.url;
-        } catch {}
+        async function gridImage() {
+          try {
+            const art = await api.sgdbList(row.id, 'hero', 0);
+            return art[0]?.thumb || art[0]?.url;
+          } catch { return null; }
+        }
+        let url = await steamImage(row);
         if (!current()) return;
-        let usingSteam = !url;
-        if (!url) url = await steamImage(row);
+        let usingGrid = !url;
+        if (!url) url = await gridImage();
         if (!url || !current()) return;
         const placeholder = el.querySelector('.mr-ic');
         const img = h('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
@@ -265,9 +267,9 @@ function chooseSteamGridDBGame(name) {
           if (current() && placeholder.parentNode === el) placeholder.replaceWith(img);
         });
         img.addEventListener('error', async () => {
-          if (usingSteam || !current()) return;
-          usingSteam = true;
-          const fallback = await steamImage(row);
+          if (usingGrid || !current()) return;
+          usingGrid = true;
+          const fallback = await gridImage();
           if (fallback && current()) img.src = fallback;
         });
         img.src = url;
