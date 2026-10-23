@@ -230,6 +230,53 @@ function chooseSteamGridDBGame(name) {
       if (!results.length) list.append(h('div', { class: 'match-empty', text: error || t('No games found. Try another name.') }));
       nav = new FocusList(els, { index: results.length ? 1 : 0,
         onChange: el => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) });
+      loadThumbnails(els.filter(el => el._row.kind === 'result'), token);
+
+    }
+
+
+    async function loadThumbnails(els, token) {
+      const current = () => !ctl.closed && token === generation;
+      const steamSearches = new Map();
+      const normalize = value => String(value).normalize('NFKC').trim().toLowerCase();
+      async function steamImage(row) {
+        const key = normalize(row.name);
+        if (!steamSearches.has(key)) {
+          steamSearches.set(key, api.searchSteam(row.name).catch(() => []));
+        }
+        const matches = (await steamSearches.get(key)).filter(result => normalize(result.name) === key && result.image);
+        // Avoid guessing between distinct Steam games with the same title.
+        return matches.length === 1 ? matches[0].image : null;
+      }
+      async function show(el) {
+        const row = el._row;
+        let url = null;
+        try {
+          const art = await api.sgdbList(row.id, 'hero', 0);
+          url = art[0]?.thumb || art[0]?.url;
+        } catch {}
+        if (!current()) return;
+        let usingSteam = !url;
+        if (!url) url = await steamImage(row);
+        if (!url || !current()) return;
+        const placeholder = el.querySelector('.mr-ic');
+        const img = h('img', { alt: '', decoding: 'async', referrerpolicy: 'no-referrer' });
+        img.addEventListener('load', () => {
+          if (current() && placeholder.parentNode === el) placeholder.replaceWith(img);
+        });
+        img.addEventListener('error', async () => {
+          if (usingSteam || !current()) return;
+          usingSteam = true;
+          const fallback = await steamImage(row);
+          if (fallback && current()) img.src = fallback;
+        });
+        img.src = url;
+      }
+      // Keep the chooser usable immediately and limit artwork requests.
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(3, els.length) }, async () => {
+        while (current() && next < els.length) await show(els[next++]);
+      }));
     }
 
     async function pick(i) {
