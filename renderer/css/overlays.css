@@ -1767,9 +1767,8 @@ body.reduce-motion .launch-overlay {
 }
 
 /* File browser (ui/filebrowser.js): the launcher's own, instead of Explorer -- */
-/* The page behind makes way; the theme background shows through. */
-body.fb-open #views,
-body.fb-open #hero-bg {
+/* Hide page controls while preserving the current background artwork. */
+body.fb-open #views {
   opacity: 0;
   transition: opacity 0.25s var(--ease);
 }
@@ -2052,3 +2051,12 @@ body[data-input="mouse"] .fb-crumb:hover {
 .fb-btn.disabled {
   opacity: 0.35;
 }
+
+/* SteamGridDB shares the Sound Themes browser; only artwork-specific details differ. */
+.sgdb-store .ss-head { flex-wrap: wrap; row-gap: 1.4rem; }
+.sgdb-store .ss-status { flex-basis: 100%; margin-left: 0; overflow-wrap: anywhere; }
+.sgdb-store .ss-panel { max-height: 92vh; }
+.sgdb-store .ss-scroll { min-height: 0; }
+.sgdb-store .ss-card { min-width: 0; }
+.sgdb-store .ss-img img { object-fit: contain; }
+.sgdb-store .ss-foot { flex-wrap: wrap; gap: 1.4rem; }

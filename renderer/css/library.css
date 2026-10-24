@@ -132,7 +132,9 @@
 }
 
 .lib-grid.stagger .lib-tile {
-  animation: fadeUp 0.55s var(--ease-out) both;
+  /* Release the animation's transform/opacity after entry instead of retaining
+     animation state on every cover throughout long scrolling sessions. */
+  animation: fadeUp 0.55s var(--ease-out) backwards;
   animation-delay: calc(var(--i) * 22ms);
 }
 

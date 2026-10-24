@@ -297,9 +297,20 @@ const CHORDS = [
 ];
 
 let amb = null;
+let musicPosition = null; // Retained across focus loss and audio-output resets.
+
+function rememberMusicPosition() {
+  if (!amb || !amb.buffer || !ctx) return;
+  const duration = amb.buffer.duration;
+  musicPosition = {
+    buffer: amb.buffer,
+    offset: duration > 0 ? (amb.offset + Math.max(0, ctx.currentTime - amb.startedAt)) % duration : 0,
+  };
+}
 
 function stopAmbient() {
   if (!amb) return;
+  rememberMusicPosition();
   const a = amb;
   amb = null;
   a.out.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.8);
@@ -329,11 +340,15 @@ export function setAmbient(on, vol = 0.35) {
     src.buffer = music.buffer;
     src.loop = true;
     src.connect(out);
-    src.start();
-    amb = { out, voices: [[src]], timer: null, sparkle: null, track };
+    // Buffer sources are single-use. Recreate one at the paused offset rather
+    // than restarting the track, even when resetAudio rebuilt the context.
+    const offset = musicPosition?.buffer === music.buffer ? musicPosition.offset : 0;
+    src.start(0, offset);
+    amb = { out, voices: [[src]], timer: null, sparkle: null, track, buffer: music.buffer, offset, startedAt: c.currentTime };
     out.gain.setTargetAtTime(vol, c.currentTime, 1.2);
     return;
   }
+  musicPosition = null;
   const wet = c.createGain();
   wet.gain.value = 0.6;
   out.connect(wet).connect(reverb);
@@ -400,6 +415,7 @@ export function setAmbient(on, vol = 0.35) {
  */
 export function resetAudio() {
   if (!ctx) return;
+  rememberMusicPosition();
   const old = ctx;
   ctx = null;
   master = null;

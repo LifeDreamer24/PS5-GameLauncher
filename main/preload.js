@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   getState: invoke('state:get'),
   getInfo: invoke('info:get'),
   setSettings: invoke('settings:set'),
+  getGpuPreference: invoke('gpu:getPreference'),
+  setGpuPreference: invoke('gpu:setPreference'),
 
   scan: invoke('library:scan'),
   refreshAll: invoke('library:refreshAll'),
@@ -21,6 +23,9 @@ contextBridge.exposeInMainWorld('api', {
   refreshArt: invoke('game:refreshArt'),
   setMatch: invoke('game:setMatch'),
   customArt: invoke('game:customArt'),
+  sgdbSearch: invoke('sgdb:search'),
+  sgdbList: invoke('sgdb:list'),
+  sgdbApply: invoke('sgdb:apply'),
   gameLocation: invoke('game:location'),
   pickProfileImage: invoke('profile:pickImage'),
   removeProfileImage: invoke('profile:removeImage'),
@@ -133,3 +138,4 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener(channel, fn);
   },
 });
+

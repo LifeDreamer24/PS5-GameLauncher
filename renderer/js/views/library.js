@@ -3,7 +3,7 @@
 
 import { h, escapeHtml, bump, clamp } from '../util.js';
 import { icon } from '../icons.js';
-import { state, on, gamesIn, sortGames, api, sourceLabel, isInstalled } from '../state.js';
+import { state, on, gamesIn, sortGames, api, setSetting, sourceLabel, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
 import { rumble, mouseActive } from '../input.js';
 import { FocusList } from '../ui/overlay.js';
@@ -49,7 +49,7 @@ export class LibraryView {
     this.name = 'library';
     this.usesHero = false;
     this.tab = 'game';
-    this.sort = 'recent';
+    this.sort = SORTS.some((s) => s.value === state.settings.librarySort) ? state.settings.librarySort : 'recent';
     this.source = 'all';
     this.installFilter = 'all';
     this.zone = 'grid';
@@ -140,6 +140,7 @@ export class LibraryView {
   }
 
   render(keep = false) {
+    clearTimeout(this.artworkTimer);
     const prevId = keep && this.games[this.gridIndex] ? this.games[this.gridIndex].id : null;
     const list = this.list();
     const sig = `${this.tab}|${this.sort}|${this.source}|${this.installFilter}|${state.settings.tileStyle}|` + list.map((g) => `${g.id}:${g.artVersion}:${g.name}:${g.favorite}:${isRunning(g)}:${isInstalled(g)}`).join(',');
@@ -233,12 +234,34 @@ export class LibraryView {
     const row = Math.floor(this.gridNav.index / COLS);
     const rowH = el.offsetHeight + parseFloat(getComputedStyle(this.grid).rowGap || 0);
     const offset = Math.max(0, row - 1) * rowH;
+    // Avoid eagerly starting downloads for every row passed during rapid input.
+    clearTimeout(this.artworkTimer);
+    if (instant) this.loadArtworkNearRow(row, rowH);
+    else this.artworkTimer = setTimeout(() => {
+      if (this.active) this.loadArtworkNearRow(row, rowH);
+    }, 140);
     if (instant) this.grid.style.transition = 'none';
     this.grid.style.transform = `translateY(${-offset}px)`;
     this.el.classList.toggle('grid-scrolled', offset > 0);
     if (instant) {
       void this.grid.offsetWidth;
       this.grid.style.transition = '';
+    }
+  }
+
+  loadArtworkNearRow(row, rowH) {
+    if (rowH <= 0) return;
+    // The grid scrolls via transforms, not native scrolling. Start requests for
+    // its destination explicitly so lazy images cannot wait for a hover/repaint.
+    // Include one row on either side, without eagerly loading the whole library.
+    const firstVisible = Math.max(0, row - 1);
+    const visibleRows = Math.max(1, Math.ceil(this.gridWrap.clientHeight / rowH));
+    const start = Math.max(0, firstVisible - 1) * COLS;
+    const end = Math.min(this.tileEls.length, (firstVisible + visibleRows + 1) * COLS);
+    for (let i = start; i < end; i++) {
+      for (const image of this.tileEls[i].querySelectorAll('img[loading="lazy"]')) {
+        image.loading = 'eager';
+      }
     }
   }
 
@@ -330,6 +353,7 @@ export class LibraryView {
             if (choice && choice.value !== this.sort) {
               this.sort = choice.value;
               this.render();
+              await setSetting('librarySort', this.sort);
             }
           },
         },
@@ -370,7 +394,7 @@ export class LibraryView {
           },
         },
         { type: 'divider' },
-        { type: 'value', label: 'Add Games', run: (el) => addGamesMenu(el) },
+        { type: 'value', label: 'Add Games', run: (el, close) => addGamesMenu(el, close) },
       ],
     });
   }
@@ -463,6 +487,7 @@ export class LibraryView {
   }
 
   hide() {
+    clearTimeout(this.artworkTimer);
     this.active = false;
   }
 }

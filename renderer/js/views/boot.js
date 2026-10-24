@@ -245,7 +245,7 @@ class Welcome {
       anchor: this.powerBtn,
       side: 'above',
       items: [
-        { label: 'Exit Launcher', icon: 'exit', run: () => api.windowAction('close') },
+        { label: 'Exit Launcher', icon: 'exit', run: ask('Exit the launcher?', '', 'Exit', () => api.windowAction('close')) },
         { label: 'Minimize Launcher', icon: 'minimize', run: () => api.windowAction('minimize') },
         { label: 'Sleep', icon: 'moon', run: ask('Put the PC to sleep?', '', 'Sleep', () => api.power('sleep')) },
         { label: 'Restart PC', icon: 'restart', run: ask('Restart the PC?', 'Unsaved work in other apps will be lost.', 'Restart', () => api.power('restart')) },

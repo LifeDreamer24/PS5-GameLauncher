@@ -8,6 +8,7 @@ const { JsonStore } = require('./store');
 const { Library } = require('./library');
 const { launchGame } = require('./launcher');
 const { searchSteam } = require('./metadata');
+const sgdb = require('./sgdb');
 const { SystemBridge } = require('./system');
 const { DiscordBridge } = require('./discord');
 const { SteamFriends } = require('./steamfriends');
@@ -19,6 +20,7 @@ const { ObsBridge } = require('./obs');
 const { SteamDownloads } = require('./steamdownloads');
 const { Storage } = require('./storage');
 const files = require('./files');
+const { gpuPreference } = require('./gpu');
 const emulators = require('./emulators');
 
 const DEFAULT_SETTINGS = {
@@ -53,6 +55,7 @@ const DEFAULT_SETTINGS = {
   ambient: false,
   ambientVolume: 35,
   // Screen
+  hardwareAcceleration: true,
   fullscreen: true,
   uiScale: 100,
   reduceMotion: false,
@@ -190,6 +193,9 @@ function start() {
   const avatarDir = path.join(dataDir, 'avatars');
   const packs = new SoundPacks(path.join(dataDir, 'soundpacks'));
   const settings = new JsonStore(path.join(dataDir, 'settings.json'), DEFAULT_SETTINGS);
+  // Electron requires this before app readiness and before any windows exist.
+  // Enabling again uses Electron's default GPU acceleration on the next launch.
+  if (settings.data.hardwareAcceleration === false) app.disableHardwareAcceleration();
   const libStore = new JsonStore(path.join(dataDir, 'library.json'), { games: [], excluded: [] });
 
   /** @type {BrowserWindow | null} */
@@ -740,6 +746,9 @@ function start() {
     },
   }));
 
+  ipcMain.handle('gpu:getPreference', () => gpuPreference());
+  ipcMain.handle('gpu:setPreference', (_e, preference) => gpuPreference(preference));
+
   ipcMain.handle('settings:set', async (e, patch) => {
     const s = settings.data;
     const prev = { ...s };
@@ -830,6 +839,9 @@ function start() {
     return g ? library.fetchMetadata([g], { force: true }) : null;
   });
   ipcMain.handle('game:setMatch', (_e, id, appid) => library.setMatch(id, appid));
+  ipcMain.handle('sgdb:search', (_e, term) => sgdb.search(settings.data.sgdbKey, term));
+  ipcMain.handle('sgdb:list', (_e, gameId, kind, page) => sgdb.list(settings.data.sgdbKey, gameId, kind, page));
+  ipcMain.handle('sgdb:apply', (_e, id, kind, artworkId) => library.setSteamGridDBArt(id, kind, artworkId));
   const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
   ipcMain.handle('game:customArt', async (_e, id, kind, file) => {
     if (!IMAGE.test(String(file)) || (await files.kind(file)) !== 'file') return null;
@@ -1333,3 +1345,4 @@ function start() {
     }
   });
 }
+

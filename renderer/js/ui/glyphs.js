@@ -15,6 +15,7 @@ const PS_SHAPES = {
 const ARROWS = `<span class="arrows">${icon('chevronLeft')}${icon('chevronRight')}</span>`;
 const DPAD = `<span class="arrows">${icon('chevronLeft')}${icon('chevronRight')}</span>`;
 
+
 const MAP = {
   xbox: {
     confirm: ['A', 'round xa'],
@@ -29,6 +30,7 @@ const MAP = {
     l2: ['LT', ''],
     r2: ['RT', ''],
     adjust: [DPAD, 'kb'],
+    scroll: ['LS', 'round scroll-stick'],
   },
   ps: {
     confirm: [PS_SHAPES.cross, 'round'],
@@ -43,6 +45,7 @@ const MAP = {
     l2: ['L2', ''],
     r2: ['R2', ''],
     adjust: [DPAD, 'kb'],
+    scroll: ['L', 'round scroll-stick'],
   },
   keyboard: {
     confirm: ['Enter', 'kb'],
@@ -57,11 +60,20 @@ const MAP = {
     l2: ['PgUp', 'kb'],
     r2: ['PgDn', 'kb'],
     adjust: [ARROWS, 'kb'],
+    scroll: ['↑ ↓', 'kb'],
   },
 };
 
 export function glyph(action) {
-  const style = getPromptStyle(state.settings.prompts);
+  const pref = state.settings.prompts;
+  const style = getPromptStyle(pref);
+  if (action === 'scroll') {
+    if (style !== 'ps' && style !== 'xbox') {
+      return '<span class="scroll-prompt"><span class="glyph kb scroll-key">↑</span><span class="glyph kb scroll-key">↓</span></span>';
+    }
+    const [label, cls] = MAP[style].scroll;
+    return `<span class="scroll-prompt"><span class="glyph ${cls}">${label}</span><span class="scroll-direction">↕</span></span>`;
+  }
   const [content, cls] = (MAP[style] || MAP.keyboard)[action] || ['?', 'kb'];
   return `<span class="glyph ${cls}">${content}</span>`;
 }
@@ -69,7 +81,7 @@ export function glyph(action) {
 export function renderHints(el, list) {
   el._hints = list;
   el.classList.add('hints');
-  el.innerHTML = list.map(([action, label]) => `<span class="hint">${glyph(action)}<span>${t(label)}</span></span>`).join('');
+  el.innerHTML = list.map(([action, label]) => `<span class="hint">${Array.isArray(action) ? action.map(glyph).join('') : glyph(action)}<span>${t(label)}</span></span>`).join('');
 }
 
 function refreshAll() {

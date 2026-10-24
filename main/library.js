@@ -5,6 +5,7 @@ const { app } = require('electron');
 const scanner = require('./scanner');
 const meta = require('./metadata');
 const emulators = require('./emulators');
+const sgdb = require('./sgdb');
 
 const ART_KEYS = ['hero', 'logo', 'capsule', 'banner', 'grid', 'icon'];
 
@@ -465,6 +466,29 @@ class Library {
     return g;
   }
 
+  async setSteamGridDBArt(id, kind, artworkId) {
+    const g = this.find(id);
+    if (!g) throw new Error('This game is no longer in your library.');
+    const url = await sgdb.artwork(this.settings.data.sgdbKey, kind, artworkId);
+    const dir = this.artPath(id);
+    await fsp.mkdir(dir, { recursive: true });
+    const name = await meta.download([url], path.join(dir, `custom-${kind}-${Date.now()}`));
+    if (!name) throw new Error('The artwork could not be downloaded. Please try again.');
+    if (this.find(id) !== g) {
+      await fsp.rm(path.join(dir, name), { force: true });
+      throw new Error('This game is no longer in your library.');
+    }
+    const previous = g.customArt?.[kind] && g.art?.[kind];
+    g.art = { ...(g.art || {}), [kind]: name };
+    g.customArt = { ...(g.customArt || {}), [kind]: true };
+    g.artVersion = Date.now();
+    this.save();
+    if (previous && previous !== name && path.basename(previous) === previous) {
+      await fsp.rm(path.join(dir, previous), { force: true }).catch(() => {});
+    }
+    return g;
+  }
+
   async setCustomArt(id, kind, file) {
     const g = this.find(id);
     if (!g || !ART_KEYS.includes(kind)) return null;
@@ -504,7 +528,11 @@ class Library {
   remove(id) {
     const g = this.find(id);
     if (!g) return;
-    if (!this.store.data.excluded.includes(id)) this.store.data.excluded.push(id);
+    // Manually added entries are removed outright; only scanned games need
+    // an exclusion to prevent them from returning on the next scan.
+    if (g.source === 'manual') {
+      this.store.data.excluded = this.store.data.excluded.filter((x) => x !== id);
+    } else if (!this.store.data.excluded.includes(id)) this.store.data.excluded.push(id);
     this.store.data.games = this.games.filter((x) => x.id !== id);
     this.deleteArt(id);
     this.save();
@@ -582,3 +610,4 @@ class Library {
 }
 
 module.exports = { Library };
+

@@ -339,12 +339,8 @@ export function browseFiles({ title, mode = 'file', exts = null, multi = false, 
 
     function finish(value) {
       if (done) return;
-      done = true;
       if (dir && mode !== 'view') remember(key, dir);
-      clearTimeout(iconTimer);
-      document.body.classList.remove('fb-open');
-      ctl.close();
-      resolve(value);
+      ctl.close(value);
     }
 
     function openPlace(p) {
@@ -565,7 +561,16 @@ export function browseFiles({ title, mode = 'file', exts = null, multi = false, 
         }
         return true;
       },
-      { closeDelay: 260 }
+      {
+        closeDelay: 260,
+        onClose: (value) => {
+          // Also clean up when navigation closes the overlay directly.
+          done = true;
+          clearTimeout(iconTimer);
+          document.body.classList.remove('fb-open');
+          resolve(value ?? null);
+        },
+      }
     );
 
     listWrap.addEventListener('wheel', (e) => {

@@ -35,7 +35,7 @@ export function openSoundStore({ kind = 'Audio' } = {}) {
     ['confirm', 'Select'],
     ['x', 'Search'],
     ['y', 'Sort'],
-    ['l1', 'Switch Tabs'],
+    [['l1', 'r1'], 'Switch Tabs'],
     ['back', 'Close'],
   ]);
   const root = h(

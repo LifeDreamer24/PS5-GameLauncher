@@ -649,15 +649,23 @@
   -webkit-line-clamp: 1;
 }
 
-/* Little equaliser on the Music icon while something plays */
+/* Slide the playing indicator below the focus ring like the online count. */
 .qm-eq {
   position: absolute;
-  right: 0.9rem;
-  bottom: 0.9rem;
+  left: 50%;
+  top: calc(50% + 2.4rem);
+  transform: translate(-50%, var(--qm-indicator-shift));
+  transition: transform 0.25s var(--ease-out), top 0.25s var(--ease-out);
+  pointer-events: none;
   display: none;
   gap: 0.2rem;
   align-items: flex-end;
   height: 1.4rem;
+}
+
+.qm-music.active .qm-eq {
+  /* Leave a separate row for the active-panel dot. */
+  top: calc(50% + 3.8rem);
 }
 
 .qm-music.playing .qm-eq {
@@ -749,8 +757,10 @@
   box-shadow: none;
 }
 
+/* Button rows use their individual controls for feedback, not a row-wide sweep. */
 .qp-row.t-buttons::before,
-.qp-row.t-buttons::after {
+.qp-row.t-buttons::after,
+.qp-row.t-buttons > .fx-wave {
   display: none;
 }
 
@@ -870,22 +880,16 @@
   color: #d83c3e;
 }
 
-/* Live dot on the Party icon while in a call */
-.qm-live {
-  position: absolute;
-  right: 0.8rem;
-  bottom: 0.8rem;
-  width: 1.2rem;
-  height: 1.2rem;
-  border-radius: 50%;
-  background: #23a55a;
-  box-shadow: 0 0 0 0.22rem #0b0d12;
-  display: none;
+/* Voice-chat status shares the online count's position and slide animation. */
+.qm-online .qm-voice {
+  display: inline-flex;
+  align-items: center;
+  color: #34c66a;
+  margin-left: 0.3rem;
 }
-
-.qm-party.live .qm-live {
-  display: block;
-}
+.qm-online .qm-voice:first-child { margin-left: 0; }
+.qm-online .qm-voice svg { width: 1.8rem; height: 1.8rem; }
+.qm-online .qm-voice.muted { color: var(--text-3); }
 
 /* DualSense battery on the Accessories icon (PS5 control center style) */
 .qm-batt {
@@ -1133,7 +1137,7 @@
 }
 
 .qm.customizing .qm-badge,
-.qm.customizing .qm-live,
+.qm.customizing .qm-online,
 .qm.customizing .qm-eq {
   display: none !important;
 }
