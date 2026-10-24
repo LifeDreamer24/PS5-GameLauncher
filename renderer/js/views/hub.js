@@ -8,6 +8,7 @@ import { HubPanel } from '../ui/gamehub.js';
 import { gameOptions } from '../ui/gameactions.js';
 import { renderHints } from '../ui/glyphs.js';
 import { t } from '../i18n.js';
+import { themeFocus } from '../thememusic.js';
 
 export class HubView {
   constructor(router) {
@@ -53,6 +54,7 @@ export class HubView {
     this.titleEl.innerHTML = `<span class="badge">${escapeHtml(sourceLabel(g))}</span><span>${escapeHtml(g.name)}</span>`;
     this.hub.setItem({ type: 'game', game: g, key: `g:${g.id}` }, { animate });
     heroBg.set(artUrl(g, 'hero'));
+    if (this.active) themeFocus(g);
     this.applyZone();
   }
 
@@ -123,5 +125,6 @@ export class HubView {
   hide() {
     this.active = false;
     heroBg.deep(false);
+    themeFocus(null);
   }
 }

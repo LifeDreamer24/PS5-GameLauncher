@@ -6,6 +6,7 @@ const scanner = require('./scanner');
 const meta = require('./metadata');
 const emulators = require('./emulators');
 const sgdb = require('./sgdb');
+const { sanitizeChoice: themeChoice } = require('./thememusic');
 
 const ART_KEYS = ['hero', 'logo', 'capsule', 'banner', 'grid', 'icon'];
 
@@ -514,6 +515,12 @@ class Library {
     const allowed = ['name', 'favorite', 'hidden', 'category', 'lastPlayed', 'launchCount', 'playtime', 'pauseMode', 'launchMode', 'controllerMode', 'padEmulation'];
     for (const k of allowed) if (k in patch) g[k] = patch[k];
     if ('padEmulation' in patch && !['dualsense', 'dualshock4', 'xbox360'].includes(g.padEmulation)) delete g.padEmulation; // follows the setting
+    if ('themeMusic' in patch) {
+      // Options › Theme Music: off, a chosen track or file; nothing = found automatically.
+      const choice = themeChoice(patch.themeMusic);
+      if (choice) g.themeMusic = choice;
+      else delete g.themeMusic;
+    }
     if ('name' in patch) g.nameLocked = true;
     if (patch.launchArgs !== undefined) {
       if (g.launch && g.launch.type === 'exe') {

@@ -3,13 +3,14 @@
 import { h, sleep } from '../util.js';
 import { api, on, artUrl, state, findGame, pushNotification, downloadFor, isInstalled } from '../state.js';
 import { sfx } from '../sound.js';
-import { optionsMenu, confirmDialog, textDialog, matchDialog } from './dialogs.js';
+import { optionsMenu, confirmDialog, textDialog, matchDialog, themeTrackDialog } from './dialogs.js';
 import { mountOverlay } from './overlay.js';
 import { startUpdate, startInstall } from './downloads.js';
 import { t } from '../i18n.js';
 import { deleteGame, offersDelete } from '../views/storage.js';
-import { pickImage, showGameLocation } from './filebrowser.js';
+import { pickImage, pickAudio, showGameLocation } from './filebrowser.js';
 import { steamGridDBPicker } from './steamgriddb.js';
+import { themeHold, themeChanged, themePause } from '../thememusic.js';
 
 let launching = false;
 
@@ -82,6 +83,7 @@ Unsaved progress may be lost.`,
   }
   launching = true;
   sfx.launch();
+  themeHold(true);
   const hero = artUrl(game, 'hero');
   const logo = artUrl(game, 'logo');
   const el = h(
@@ -130,6 +132,7 @@ Unsaved progress may be lost.`,
     app.classList.remove('launching');
     ctl.close();
     launching = false;
+    themeHold(false);
   }
 }
 
@@ -163,12 +166,65 @@ async function changeArtwork(game, anchor) {
   });
 }
 
+/** Options › Theme Music, in a few words: what plays for this game. */
+function themeMusicLabel(game) {
+  if (state.settings.themeMusic !== true) return 'Off in Settings';
+  const m = game.themeMusic;
+  if (!m) return 'Automatic';
+  if (m.mode === 'off') return 'Off';
+  if (m.mode === 'file') return m.path.split(/[\\/]/).pop();
+  return m.title || 'Chosen Track';
+}
+
+/** Options › Theme Music: found automatically, a chosen video, a file of one's own, or none. */
+async function chooseThemeMusic(game, anchor) {
+  const id = game.id;
+  const m = game.themeMusic;
+  const mode = m ? m.mode : 'auto';
+  const youtube = state.settings.themeMusic === true; // yt-dlp is there
+  const choice = await optionsMenu({
+    title: 'Theme Music',
+    anchor,
+    items: [
+      { value: 'auto', label: 'Automatic', hint: 'Its theme, found on YouTube', checked: mode === 'auto' },
+      { value: 'track', label: 'Choose from YouTube…', hint: !youtube ? 'Turn on Game Theme Music in Settings' : mode === 'track' ? m.title : undefined, disabled: !youtube, checked: mode === 'track' },
+      { value: 'file', label: 'Your Own File…', hint: mode === 'file' ? themeMusicLabel(game) : undefined, checked: mode === 'file' },
+      { value: 'off', label: 'Off for This Game', checked: mode === 'off' },
+    ],
+  });
+  if (!choice) return;
+  let pick = null;
+  if (choice.value === 'track') {
+    const tr = await themeTrackDialog(game);
+    if (!tr) return;
+    pick = { mode: 'track', source: 'youtube', id: tr.id, title: tr.title, channel: tr.channel };
+  } else if (choice.value === 'file') {
+    const file = await pickAudio('Choose Theme Music');
+    if (!file) return;
+    pick = { mode: 'file', path: file };
+  } else if (choice.value === 'off') pick = { mode: 'off' };
+  await api.updateGame(id, { themeMusic: pick });
+  const g = findGame(id);
+  if (g) g.themeMusic = pick || undefined;
+  themeChanged(id);
+}
+
 /**
- * Show the options menu for a game.
+ * Show the options menu for a game ("…" / the Options button). Its theme
+ * music pauses while the menu (or anything opened from it) is up.
  * extra: additional items prepended to the menu.
  */
-export async function gameOptions(game, anchor, { extra = [] } = {}) {
+export async function gameOptions(game, anchor, opts) {
   if (!game) return;
+  themePause(true);
+  try {
+    return await gameOptionsMenu(game, anchor, opts);
+  } finally {
+    themePause(false);
+  }
+}
+
+async function gameOptionsMenu(game, anchor, { extra = [] } = {}) {
   const id = game.id;
   const running = state.running.has(id);
   const dl = downloadFor(game);
@@ -189,6 +245,7 @@ export async function gameOptions(game, anchor, { extra = [] } = {}) {
       run: () => api.updateGame(id, { favorite: !game.favorite }),
     },
     { label: 'Change Artwork', icon: 'image', submenu: true, run: () => changeArtwork(game, anchor) },
+    { label: 'Theme Music', icon: 'music', hint: themeMusicLabel(game), submenu: true, run: () => chooseThemeMusic(game, anchor) },
   ];
   const PAUSE_MODES = [
     { value: 'auto', label: 'Automatic', hint: 'Only while the game is offline' },

@@ -1,9 +1,10 @@
 // Declarative settings tree: categories → sections → items.
 
-import { api, state, refreshInfo, pushNotification, setSetting } from '../state.js';
+import { api, state, refreshInfo, pushNotification, setSetting, isInstalled } from '../state.js';
 import { fmtBytes, escapeHtml } from '../util.js';
 import { confirmDialog, optionsMenu, infoDialog } from '../ui/dialogs.js';
 import { update, loadUpdate, checkUpdate, downloadUpdate, installUpdate, updateStatus } from '../updates.js';
+import { ytdlp, loadYtdlp } from '../thememusic.js';
 import { AVATARS } from '../ui/avatar.js';
 import { guideCategory } from './guide.js';
 import { openSoundStore } from './soundstore.js';
@@ -148,6 +149,98 @@ function discordItems() {
     type: 'note',
     label:
       'One-time setup: in the Discord Developer Portal create a New Application (any name). Under OAuth2, copy the Client ID and reset/copy the Client Secret, and add the redirect http://localhost. Enter both here and choose Connect — Discord asks you to authorize the launcher. Only you can use this application, which is what lets it control your voice.',
+  });
+  return items;
+}
+
+/** Download yt-dlp (its progress shows in Settings › Sound › Game Theme Music). True once it's there. */
+async function downloadYtdlp() {
+  try {
+    ytdlp.state = await api.ytdlpInstall();
+    return true;
+  } catch (err) {
+    pushNotification({ title: 'yt-dlp couldn’t be downloaded', body: String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), icon: 'info', kind: 'system' });
+    return false;
+  }
+}
+
+/** Turn game theme music on (downloading yt-dlp first if it isn't there) or off. */
+async function setThemeMusic(on) {
+  if (!on) return setSetting('themeMusic', false);
+  if (!(ytdlp.state && ytdlp.state.installed)) {
+    const ok = await confirmDialog({
+      title: 'Download yt-dlp?',
+      message: 'Theme music is found on YouTube with yt-dlp, a free open-source program. It is downloaded once from its GitHub page (about 17 MB) and kept up to date by the launcher. Each game’s music is downloaded the first time it plays.',
+      confirmLabel: 'Download',
+    });
+    if (!ok || !(await downloadYtdlp())) return;
+  }
+  await setSetting('themeMusic', true);
+}
+
+/** Settings › Sound › Game Theme Music. */
+function themeMusicItems() {
+  const y = ytdlp.state;
+  const installed = !!(y && y.installed);
+  const items = [
+    { type: 'toggle', label: 'Game Theme Music', get: () => state.settings.themeMusic === true && installed, set: (v) => setThemeMusic(v), disabled: !!(y && y.installing) },
+    { type: 'range', key: 'themeMusicVolume', label: 'Theme Music Volume', min: 0, max: 100, step: 5, unit: '%' },
+  ];
+  if (y && y.installing) items.push({ type: 'info', label: 'yt-dlp', value: t('Downloading… {p}%', { p: Math.round((y.progress || 0) * 100) }) });
+  else if (!installed) {
+    // The program theme music needs, without turning the music on yet (the switch above does that).
+    items.push({ type: 'action', icon: 'download', label: 'Download yt-dlp', value: (y && y.error) || 'About 17 MB', run: () => downloadYtdlp() });
+  } else {
+    items.push(
+      { type: 'info', label: 'yt-dlp', value: y.version || '' },
+      {
+        type: 'action',
+        icon: 'trash',
+        label: 'Remove yt-dlp',
+        run: async () => {
+          if (!(await confirmDialog({ title: 'Remove yt-dlp?', message: 'Game theme music turns off. Turning it on again downloads yt-dlp again.', confirmLabel: 'Remove', danger: true }))) return;
+          await setSetting('themeMusic', false);
+          ytdlp.state = await api.ytdlpRemove();
+        },
+      }
+    );
+  }
+  // Every installed game's theme, found and downloaded now instead of when it's first selected.
+  const f = ytdlp.fetch;
+  if (installed) items.push(onOff('themeMusicNewGames', 'Get Theme Music for New Games'));
+  if (installed && f && f.running) {
+    items.push(
+      { type: 'info', label: 'Getting Theme Music', value: t('{done} of {total}', { done: f.done, total: f.total }) + (f.current ? ` · ${f.current}` : '') },
+      { type: 'action', icon: 'close', label: f.stopping ? 'Stopping…' : 'Stop', disabled: f.stopping, run: () => api.themeStopFetch() }
+    );
+  } else if (installed) {
+    const count = state.games.filter((g) => isInstalled(g) && g.category !== 'media').length;
+    items.push({
+      type: 'action',
+      icon: 'download',
+      label: 'Get Theme Music for All Games',
+      value: f && f.total ? t('{found} of {total} found', { found: f.found, total: f.total }) : t('{n} installed games', { n: count }),
+      run: () => {
+        api.themeFetchAll().catch(() => {});
+      },
+    });
+  }
+  if (ytdlp.cacheSize) {
+    items.push({
+      type: 'action',
+      icon: 'trash',
+      label: 'Delete Downloaded Theme Music',
+      value: fmtBytes(ytdlp.cacheSize),
+      run: async () => {
+        await api.themeClearCache();
+        await loadYtdlp();
+      },
+    });
+  }
+  items.push({
+    type: 'note',
+    label:
+      'A game’s theme plays while it’s selected on Home or in its game hub. It’s found on YouTube with yt-dlp, and each song is downloaded once (the launcher keeps up to 1 GB of them). It pauses while another app plays media, and the menu music waits while it plays. Choose another video or your own file in a game’s Options › Theme Music.',
   });
   return items;
 }
@@ -892,6 +985,7 @@ export function buildSchema(router) {
         { label: 'Output Device', items: outputItems, onEnter: () => loadOutputs() },
         { label: 'UI Sounds', items: () => packChoiceItems('ui'), onEnter: () => loadPacks() },
         { label: 'Menu Music', items: () => packChoiceItems('music'), onEnter: () => loadPacks() },
+        { label: 'Game Theme Music', items: themeMusicItems, onEnter: () => loadYtdlp() },
       ],
     },
     capturesCategory(),

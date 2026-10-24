@@ -2,6 +2,7 @@ import { $, h } from './util.js';
 import { state, on, emit, loadState, api, pushNotification } from './state.js';
 import { setHandler, externalAction, setGamepadPolling, setGamepadProbe, useGamepadApi } from './input.js';
 import { sfx, configureSound, setAmbient, unlockAudio, resetAudio, setSoundPacks } from './sound.js';
+import { themeActive, setThemeConditions } from './thememusic.js';
 import { background } from './background.js';
 import { heroBg } from './ui/herobg.js';
 import { topOverlay } from './ui/overlay.js';
@@ -94,19 +95,23 @@ let packsKey = null;
 // Menu music waits until the user has picked their profile.
 let ambientReady = false;
 
-// Another app is playing media (Spotify, a video…): the menu music waits.
+// Another app is playing media (Spotify, a video…): the menu and theme music wait.
 let otherMedia = false;
 let mediaTimer = null;
 
 function updateAmbient() {
   const s = state.settings;
-  const want = ambientReady && !!s.ambient && state.window.focused !== false;
-  setAmbient(want && !otherMedia, (s.ambientVolume ?? 35) / 100);
-  // Watch Windows media sessions only while the music would play.
-  if (want && !mediaTimer) {
+  const focused = ambientReady && state.window.focused !== false;
+  const want = focused && !!s.ambient;
+  // A game's theme music plays instead of the menu music (see thememusic.js).
+  setAmbient(want && !otherMedia && !themeActive(), (s.ambientVolume ?? 35) / 100);
+  setThemeConditions({ ready: ambientReady, otherMedia });
+  // Watch Windows media sessions only while either music would play.
+  const watch = focused && (!!s.ambient || s.themeMusic === true);
+  if (watch && !mediaTimer) {
     mediaTimer = setInterval(checkOtherMedia, 2000);
     checkOtherMedia();
-  } else if (!want && mediaTimer) {
+  } else if (!watch && mediaTimer) {
     clearInterval(mediaTimer);
     mediaTimer = null;
   }
@@ -245,6 +250,7 @@ async function main() {
 
   on('settings', applySettings);
   on('window', applyWindow);
+  on('theme-music', updateAmbient);
   // In-game sleep: close the audio output (the next sound opens a fresh one).
   on('sleep', (asleep) => asleep && resetAudio());
   on('clock', updateClocks);

@@ -1,7 +1,8 @@
 ; PS5 Game Launcher setup additions (electron-builder includes build/installer.nsh).
 ;
 ; An extra page after the install folder offers the programs some features
-; need: HidHide and VIIPER for Controller in Games, OBS Studio for captures.
+; need: HidHide and VIIPER for Controller in Games, OBS Studio for captures,
+; yt-dlp for game theme music.
 ; Nothing is ticked by default and installed ones are greyed out. The ticked
 ; ones are downloaded and installed at the end of setup by deps.ps1; if a
 ; driver needs it, setup offers to restart Windows.
@@ -16,9 +17,11 @@
   Var ExtraHidHide
   Var ExtraViiper
   Var ExtraObs
+  Var ExtraYtDlp
   Var ExtraBoxHidHide
   Var ExtraBoxViiper
   Var ExtraBoxObs
+  Var ExtraBoxYtDlp
 
   Page custom ExtrasPageShow ExtrasPageLeave
 
@@ -36,22 +39,27 @@
     ${NSD_CreateLabel} 0 0 100% 20u "Tick what you'd like installed. Each one is downloaded from its official GitHub page at the end of setup, so an internet connection is needed."
     Pop $0
 
-    ${NSD_CreateCheckbox} 0 26u 100% 11u "HidHide - hides your real controller from games"
+    ${NSD_CreateCheckbox} 0 22u 100% 11u "HidHide - hides your real controller from games"
     Pop $ExtraBoxHidHide
-    ${NSD_CreateLabel} 13u 38u -13u 10u "For Controller in Games (no double input). Installs a driver."
+    ${NSD_CreateLabel} 13u 33u -13u 10u "For Controller in Games (no double input). Installs a driver."
     Pop $0
 
-    ${NSD_CreateCheckbox} 0 54u 100% 11u "VIIPER - the virtual controller games see (with USBIP)"
+    ${NSD_CreateCheckbox} 0 46u 100% 11u "VIIPER - the virtual controller games see (with USBIP)"
     Pop $ExtraBoxViiper
-    ${NSD_CreateLabel} 13u 66u -13u 10u "For Controller in Games. Starts with Windows. Installs a driver."
+    ${NSD_CreateLabel} 13u 57u -13u 10u "For Controller in Games. Starts with Windows. Installs a driver."
     Pop $0
 
-    ${NSD_CreateCheckbox} 0 82u 100% 11u "OBS Studio - records clips, screenshots and gameplay"
+    ${NSD_CreateCheckbox} 0 70u 100% 11u "OBS Studio - records clips, screenshots and gameplay"
     Pop $ExtraBoxObs
-    ${NSD_CreateLabel} 13u 94u -13u 10u "For Settings > Captures. Runs hidden in the background while you play."
+    ${NSD_CreateLabel} 13u 81u -13u 10u "For Settings > Captures. Runs hidden in the background while you play."
     Pop $0
 
-    ${NSD_CreateLabel} 0 114u 100% 20u "Windows asks for permission to install drivers, and a restart may be needed afterwards. You can also install these later (User Guide > Controller in Games)."
+    ${NSD_CreateCheckbox} 0 94u 100% 11u "yt-dlp - game theme music from YouTube"
+    Pop $ExtraBoxYtDlp
+    ${NSD_CreateLabel} 13u 105u -13u 10u "For Settings > Sound > Game Theme Music. A small program, no driver."
+    Pop $0
+
+    ${NSD_CreateLabel} 0 120u 100% 20u "Windows asks for permission to install drivers, and a restart may be needed afterwards. You can also install these later (User Guide > Controller in Games, Settings > Sound)."
     Pop $0
 
     ; Already installed: listed, but there is nothing to do.
@@ -84,6 +92,14 @@
       ${NSD_Check} $ExtraBoxObs
     ${endif}
 
+    ; yt-dlp lives in the launcher's data folder (main/ytdlp.js).
+    ${if} ${FileExists} "$APPDATA\${PRODUCT_NAME}\tools\yt-dlp.exe"
+      ${NSD_SetText} $ExtraBoxYtDlp "yt-dlp - already installed"
+      EnableWindow $ExtraBoxYtDlp 0
+    ${elseif} $ExtraYtDlp == ${BST_CHECKED}
+      ${NSD_Check} $ExtraBoxYtDlp
+    ${endif}
+
     nsDialogs::Show
   FunctionEnd
 
@@ -91,6 +107,7 @@
     ${NSD_GetState} $ExtraBoxHidHide $ExtraHidHide
     ${NSD_GetState} $ExtraBoxViiper $ExtraViiper
     ${NSD_GetState} $ExtraBoxObs $ExtraObs
+    ${NSD_GetState} $ExtraBoxYtDlp $ExtraYtDlp
   FunctionEnd
 !macroend
 
@@ -104,6 +121,9 @@
   ${endif}
   ${if} $ExtraObs == ${BST_CHECKED}
     StrCpy $R0 "$R0 -Obs"
+  ${endif}
+  ${if} $ExtraYtDlp == ${BST_CHECKED}
+    StrCpy $R0 '$R0 -YtDlp -ToolsDir "$APPDATA\${PRODUCT_NAME}\tools"'
   ${endif}
   ${if} $R0 != ""
     InitPluginsDir
@@ -123,7 +143,7 @@
     ${endif}
     IntOp $R3 $R2 & 1
     ${if} $R3 <> 0
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Some extras couldn't be installed (Show details lists why). You can install them later: User Guide > Controller in Games." /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Some extras couldn't be installed (Show details lists why). You can install them later: User Guide > Controller in Games, or Settings > Sound for yt-dlp." /SD IDOK
     ${endif}
     IntOp $R3 $R2 & 2
     ${if} $R3 <> 0

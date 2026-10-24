@@ -389,6 +389,22 @@ body[data-input="mouse"] .text-dialog .osk {
   width: 16rem;
 }
 
+/* Theme music videos: a note instead of a picture, channel and length beneath the title */
+.theme-dialog .match-row {
+  flex-shrink: 0; /* long titles take two lines instead of running into the next row */
+}
+
+.theme-dialog .mr-ic {
+  width: 6rem;
+}
+
+.mr-sub {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 1.8rem;
+  color: var(--text-3);
+}
+
 .match-loading {
   display: grid;
   place-items: center;

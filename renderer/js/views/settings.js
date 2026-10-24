@@ -47,6 +47,7 @@ export class SettingsView {
     on('discord', () => this.active && this.cat && this.cat.id === 'users' && rerender());
     on('steamfriends', () => this.active && this.cat && this.cat.id === 'users' && rerender());
     on('update', () => this.active && this.cat && this.cat.id === 'system' && rerender());
+    on('ytdlp', () => this.active && this.cat && this.cat.id === 'sound' && rerender());
   }
 
   build() {
@@ -232,6 +233,10 @@ export class SettingsView {
     const sig = `${this.cat.id}|${this.section}|` + defs.map((d) => `${d.type}|${d.label}|${d.busy || ''}|${d.disabled || ''}|${d.valueClass || ''}|${this.itemHtml(d)}`).join('\n');
     if (keep && sig === this.listSig) return;
     this.listSig = sig;
+    // The same rows with new values (a percentage, a polling rate…): only those rows change.
+    const shape = `${this.cat.id}|${this.section}|` + defs.map((d) => `${d.type}|${d.label}|${d.n || ''}`).join('\n');
+    if (keep && shape === this.listShape && this.patchList(defs)) return;
+    this.listShape = shape;
     this.defs = defs;
     this.list.innerHTML = '';
     const focusables = [];
@@ -248,19 +253,20 @@ export class SettingsView {
           d.type === 'step'
             ? h('button', { class: 'set-step fx fx-in' }, h('span', { class: 'ss-num', text: String(d.n) }), h('span', { class: 'ss-text', text: t(d.label) }))
             : h('button', { class: `set-item fx fx-in t-${d.type}${d.danger ? ' danger' : ''}${d.disabled ? ' disabled' : ''}` });
-        if (d.type !== 'step') el.innerHTML = this.itemHtml(d);
+        if (d.type !== 'step') el.innerHTML = el._html = this.itemHtml(d);
         const idx = focusables.length;
+        // el._def, not d: patchList() swaps in newer definitions.
         el.addEventListener('mouseenter', () => {
-          if (mouseActive() && !d.disabled) {
+          if (mouseActive() && !el._def.disabled) {
             this.setZone('list', true);
             this.listNav.set(idx);
           }
         });
         el.addEventListener('click', () => {
-          if (d.disabled) return;
+          if (el._def.disabled) return;
           this.setZone('list', true);
           this.listNav.set(idx);
-          this.activate(d, el);
+          this.activate(el._def, el);
         });
         el._def = d;
         focusables.push(el);
@@ -277,6 +283,36 @@ export class SettingsView {
     this.listNav = new FocusList(focusables, { index: start, onChange: () => this.scrollList() });
     this.applyZone();
     this.scrollList(!keep);
+  }
+
+  /**
+   * Update the rows in place (their values, busy and disabled states), keeping
+   * the list, focus and scroll as they are. False when it can't (then the list
+   * is built again).
+   */
+  patchList(defs) {
+    const rows = [...this.list.children];
+    if (rows.length !== defs.length) return false;
+    defs.forEach((d, i) => {
+      const el = rows[i];
+      if (d.type === 'header') {
+        const html = `${escapeHtml(t(d.label))}${d.busy ? '<span class="spinner sm"></span>' : ''}`;
+        if (el.innerHTML !== html) el.innerHTML = html;
+      } else if (d.type === 'note') {
+        if (el.textContent !== t(d.label)) el.textContent = t(d.label);
+      } else {
+        if (d.type !== 'step') {
+          const html = this.itemHtml(d);
+          if (el._html !== html) el.innerHTML = html;
+          el._html = html;
+        }
+        el.classList.toggle('danger', !!d.danger);
+        el.classList.toggle('disabled', !!d.disabled);
+        el._def = d;
+      }
+    });
+    this.defs = defs;
+    return true;
   }
 
   itemHtml(d) {

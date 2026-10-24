@@ -2,11 +2,13 @@
 #   -HidHide  HidHide (Nefarius): hides the real controller from games
 #   -Viiper   VIIPER (+ usbip-win2): the virtual controller games see
 #   -Obs      OBS Studio: clips, screenshots and recordings
+#   -YtDlp    yt-dlp: game theme music from YouTube (into -ToolsDir, the
+#             launcher's data folder; see main/ytdlp.js)
 # Each comes from the latest release on its official GitHub page. Output lines
 # go to the setup's details list. Exit code: bit 1 = something failed,
 # bit 2 = Windows needs a restart.
 
-param([switch]$HidHide, [switch]$Viiper, [switch]$Obs)
+param([switch]$HidHide, [switch]$Viiper, [switch]$Obs, [switch]$YtDlp, [string]$ToolsDir)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is many times slower with its progress bar
@@ -105,6 +107,31 @@ if ($Obs) {
     $code = Invoke-Setup $file @('/S') -Elevated -minutes 20
     if ($code -ne 0) { throw "OBS setup ended with code $code." }
     Say '  OBS Studio is installed.'
+  }
+}
+
+if ($YtDlp) {
+  Step 'yt-dlp (game theme music)' {
+    if (-not $ToolsDir) { $ToolsDir = Join-Path $env:APPDATA 'PS5 Game Launcher\tools' }
+    $rel = Invoke-RestMethod -UseBasicParsing -Uri 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest' -Headers @{ 'User-Agent' = 'PS5GameLauncher-Setup' }
+    $exe = $rel.assets | Where-Object { $_.name -eq 'yt-dlp.exe' } | Select-Object -First 1
+    $sums = $rel.assets | Where-Object { $_.name -eq 'SHA2-256SUMS' } | Select-Object -First 1
+    if (-not $exe -or -not $sums) { throw "No Windows download in the latest yt-dlp release ($($rel.tag_name))." }
+    # yt-dlp.exe isn't code-signed: it's checked against its release's checksums instead.
+    $list = (Invoke-WebRequest -UseBasicParsing -Uri $sums.browser_download_url).Content
+    if ($list -is [byte[]]) { $list = [Text.Encoding]::ASCII.GetString($list) }
+    $want = ([regex]::Match($list, '(?im)^([0-9a-f]{64})\s+\*?yt-dlp\.exe\s*$')).Groups[1].Value
+    if (-not $want) { throw 'The yt-dlp release has no checksum for its download.' }
+    $file = Join-Path $work 'yt-dlp.exe'
+    Say ("  Downloading yt-dlp {0} ({1:N0} MB)..." -f $rel.tag_name, ($exe.size / 1MB))
+    Invoke-WebRequest -UseBasicParsing -Uri $exe.browser_download_url -OutFile $file
+    if ((Get-FileHash -Algorithm SHA256 -Path $file).Hash -ne $want.ToUpper()) {
+      Remove-Item $file -Force -ErrorAction SilentlyContinue
+      throw "The yt-dlp download doesn't match its checksum. It was not kept."
+    }
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    Move-Item -Force -Path $file -Destination (Join-Path $ToolsDir 'yt-dlp.exe')
+    Say '  yt-dlp is installed. Game Theme Music is on (Settings > Sound).'
   }
 }
 

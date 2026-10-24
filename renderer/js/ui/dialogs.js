@@ -11,6 +11,7 @@ import { createOSK } from './osk.js';
 import { mouseActive } from '../input.js';
 import { sliderHtml, setSlider, dragSlider } from './slider.js';
 import { t } from '../i18n.js';
+import { themePreview } from '../thememusic.js';
 
 /* ------------------------------------------------------------------ */
 /* Options menu                                                        */
@@ -522,6 +523,119 @@ export function matchDialog(game) {
           sfx.back();
           ctl.close();
           resolve(null);
+        }
+        return true;
+      },
+      { dimApp: true }
+    );
+    sfx.open();
+    search();
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Theme music track picker                                            */
+/* ------------------------------------------------------------------ */
+
+const duration = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '');
+
+/** Options › Theme Music › Choose from YouTube: videos for the game; the focused one plays. */
+export function themeTrackDialog(game) {
+  return new Promise((resolve) => {
+    let term = game.name;
+    let isGame = true; // the game's name (searched as "<name> theme music") until another is typed
+    let gen = 0;
+    const listEl = h('div', { class: 'match-list' });
+    const termEl = h('div', { class: 'match-term' });
+    const root = h(
+      'div',
+      { class: 'overlay dialog-overlay' },
+      h(
+        'div',
+        { class: 'dialog match-dialog theme-dialog' },
+        h('div', { class: 'dlg-title', text: t('Choose Theme Music') }),
+        h('div', { class: 'dlg-msg', text: t('Videos found on YouTube. The selected one plays (the first time, it takes a few seconds to download).') }),
+        termEl,
+        listEl
+      )
+    );
+    let nav = new FocusList([]);
+    let previewTimer = null;
+    const cur = game.themeMusic && game.themeMusic.mode === 'track' ? `yt:${game.themeMusic.id}` : null;
+
+    // Play the focused video (after a moment, so scrolling through doesn't download each one).
+    const focusRow = (el) => {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      clearTimeout(previewTimer);
+      const r = el._row;
+      previewTimer = setTimeout(() => themePreview(r.kind === 'track' ? r : null), 500);
+    };
+
+    async function search() {
+      const my = ++gen;
+      termEl.innerHTML = `${icon('search')}<span>${escapeHtml(isGame ? `${term} theme music` : term)}</span>`;
+      listEl.innerHTML = '<div class="match-loading"><div class="spinner"></div></div>';
+      let tracks = [];
+      let error = '';
+      try {
+        tracks = await api.themeCandidates(term, isGame);
+      } catch (err) {
+        error = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+      }
+      if (my !== gen || ctl.closed) return;
+      const rows = [{ kind: 'search', label: 'Search for a different name…', icon: 'search' }, ...tracks.map((x) => ({ kind: 'track', ...x }))];
+      const els = rows.map((r, i) => {
+        const el = h('button', {
+          class: `match-row fx fx-in ${r.kind}`,
+          html:
+            r.kind === 'track'
+              ? `<span class="mr-ic">${icon('music')}</span><span class="mr-name">${escapeHtml(r.title)}<span class="mr-sub">${escapeHtml([r.channel, duration(r.duration)].filter(Boolean).join(' · '))}</span></span>${r.key === cur ? `<span class="mr-cur">${icon('check')}</span>` : ''}`
+              : `<span class="mr-ic">${icon(r.icon)}</span><span class="mr-name">${escapeHtml(t(r.label))}</span>`,
+          onmouseenter: () => mouseActive() && nav.set(i),
+          onclick: () => pick(i),
+        });
+        el._row = r;
+        return el;
+      });
+      listEl.replaceChildren(...els);
+      if (!tracks.length) listEl.append(h('div', { class: 'match-empty', text: error || t('Nothing found. Try another name.') }));
+      const at = Math.max(1, rows.findIndex((r) => r.key && r.key === cur));
+      nav = new FocusList(els, { index: tracks.length ? at : 0, onChange: focusRow });
+      if (nav.current) focusRow(nav.current);
+    }
+
+    function close(value) {
+      clearTimeout(previewTimer);
+      themePreview(null);
+      ctl.close();
+      resolve(value);
+    }
+
+    async function pick(i) {
+      const r = nav.els[i]?._row;
+      if (!r) return;
+      sfx.select();
+      if (r.kind === 'search') {
+        const v = await textDialog({ title: 'Search YouTube', value: isGame ? `${term} theme music` : term });
+        if (v && v.trim() && !ctl.closed) {
+          term = v.trim();
+          isGame = false;
+          search();
+        }
+        return;
+      }
+      close(r);
+    }
+
+    const ctl = mountOverlay(
+      root,
+      (action) => {
+        if (action === 'up' || action === 'down') {
+          nav.move(action === 'up' ? -1 : 1) ? sfx.move() : sfx.bump();
+        } else if (action === 'confirm') pick(nav.index);
+        else if (action === 'back') {
+          sfx.back();
+          close(null);
         }
         return true;
       },

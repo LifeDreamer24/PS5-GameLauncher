@@ -23,6 +23,18 @@ contextBridge.exposeInMainWorld('api', {
   refreshArt: invoke('game:refreshArt'),
   setMatch: invoke('game:setMatch'),
   customArt: invoke('game:customArt'),
+  themeFind: invoke('theme:find'),
+  themeAudio: invoke('theme:audio'),
+  themeCandidates: invoke('theme:candidates'),
+  themeTrackAudio: invoke('theme:trackAudio'),
+  themeCacheSize: invoke('theme:cacheSize'),
+  themeClearCache: invoke('theme:clearCache'),
+  themeFetchAll: invoke('theme:fetchAll'),
+  themeFetchState: invoke('theme:fetchState'),
+  themeStopFetch: invoke('theme:stopFetch'),
+  ytdlpState: invoke('ytdlp:state'),
+  ytdlpInstall: invoke('ytdlp:install'),
+  ytdlpRemove: invoke('ytdlp:remove'),
   sgdbSearch: invoke('sgdb:search'),
   sgdbList: invoke('sgdb:list'),
   sgdbApply: invoke('sgdb:apply'),
@@ -131,7 +143,7 @@ contextBridge.exposeInMainWorld('api', {
   pathForFile: (file) => webUtils.getPathForFile(file),
 
   on(channel, cb) {
-    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'steamfriends:state', 'update:state', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'capture:saved', 'app:sleep', 'downloads:state'];
+    const allowed = ['library:changed', 'scan:progress', 'notify', 'game:exited', 'game:running', 'window:state', 'settings:changed', 'discord:state', 'steamfriends:state', 'update:state', 'ytdlp:state', 'theme:fetch', 'navigate', 'pad:action', 'overlay:open', 'overlay:close', 'overlay:hidden', 'overlay:toast', 'game:started', 'discord:message', 'discord:chat', 'passthrough:state', 'dualsense:state', 'storage:changed', 'capture:state', 'capture:saved', 'app:sleep', 'downloads:state'];
     if (!allowed.includes(channel)) return () => {};
     const fn = (_e, payload) => cb(payload);
     ipcRenderer.on(channel, fn);

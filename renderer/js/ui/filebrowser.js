@@ -602,6 +602,13 @@ export function pickImage(title, key = 'image') {
   return browseFiles({ title, mode: 'file', exts: IMAGES, key });
 }
 
+const SONGS = ['mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav', 'flac', 'webm'];
+
+/** A game's own theme music (Options › Theme Music › Your Own File). */
+export function pickAudio(title) {
+  return browseFiles({ title, mode: 'file', exts: SONGS, key: 'music' });
+}
+
 /** Library › Add Folder: a folder with game shortcuts. */
 export async function addGameFolder() {
   const dir = await browseFiles({ title: 'Choose a Folder With Games', mode: 'folder', key: 'games' });

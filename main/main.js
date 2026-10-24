@@ -9,6 +9,8 @@ const { Library } = require('./library');
 const { launchGame } = require('./launcher');
 const { searchSteam } = require('./metadata');
 const sgdb = require('./sgdb');
+const { ThemeMusic, sanitizeChoice: themeChoice } = require('./thememusic');
+const { YtDlp } = require('./ytdlp');
 const { SystemBridge } = require('./system');
 const { DiscordBridge } = require('./discord');
 const { SteamFriends } = require('./steamfriends');
@@ -54,6 +56,9 @@ const DEFAULT_SETTINGS = {
   uiVolume: 60,
   ambient: false,
   ambientVolume: 35,
+  themeMusic: null, // null: on when yt-dlp is installed (see YtDlp)
+  themeMusicVolume: 50,
+  themeMusicNewGames: true,
   // Screen
   hardwareAcceleration: true,
   fullscreen: true,
@@ -207,11 +212,38 @@ function start() {
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
     if (!MAIN_ONLY.has(channel) && overlay) overlay.send(channel, payload);
   };
-  const library = new Library({ store: libStore, settings, artDir, send });
+  // Library changes also tell game theme music about newly installed games (set up below).
+  let onLibraryChanged = null;
+  const librarySend = (channel, payload) => {
+    send(channel, payload);
+    if (channel === 'library:changed' && onLibraryChanged) onLibraryChanged(payload);
+  };
+  const library = new Library({ store: libStore, settings, artDir, send: librarySend });
   const system = new SystemBridge();
   const discord = new DiscordBridge({ file: path.join(dataDir, 'discord.json'), send });
   const steamFriends = new SteamFriends({ file: path.join(dataDir, 'steamfriends.json'), send, system });
   const updater = new Updater({ send, settings });
+  const ytdlp = new YtDlp({ dataDir, settings, send });
+  const themeMusic = new ThemeMusic({ dataDir, ytdlp, send });
+  // Game theme music starts on when setup installed yt-dlp (its Extras page);
+  // otherwise turning it on in Settings downloads yt-dlp first.
+  if (settings.data.themeMusic == null) {
+    settings.data.themeMusic = ytdlp.installed();
+    settings.saveSoon();
+  }
+  // A newer yt-dlp every couple of days, quietly (YouTube changes break old ones).
+  const ytdlpUpdate = () => settings.data.themeMusic && ytdlp.updateIfDue();
+  setTimeout(ytdlpUpdate, 60 * 1000);
+  setInterval(ytdlpUpdate, 6 * 60 * 60 * 1000);
+  // A game that appears installed (a scan found it, a download finished) gets
+  // its theme right away (Settings › Sound › Get Theme Music for New Games).
+  const themeGame = (g) => g.installed !== false && g.category !== 'media';
+  const knownGames = new Set(library.games.filter(themeGame).map((g) => g.id));
+  onLibraryChanged = (games) => {
+    const fresh = (games || []).filter((g) => themeGame(g) && !knownGames.has(g.id));
+    fresh.forEach((g) => knownGames.add(g.id));
+    if (fresh.length && settings.data.themeMusic === true && settings.data.themeMusicNewGames !== false && ytdlp.installed()) themeMusic.fetchNew(fresh);
+  };
   const obs = new ObsBridge({ dataDir, settings, send, system, defaultDir: () => path.join(app.getPath('videos'), 'PS5 Game Launcher') });
   overlay = new OverlayManager({
     system,
@@ -839,6 +871,33 @@ function start() {
     return g ? library.fetchMetadata([g], { force: true }) : null;
   });
   ipcMain.handle('game:setMatch', (_e, id, appid) => library.setMatch(id, appid));
+  // Game theme music (main/thememusic.js, from YouTube with yt-dlp): what
+  // plays for a game, its audio, and videos to choose from in Options › Theme Music.
+  ipcMain.handle('theme:find', async (_e, id) => {
+    const tr = await themeMusic.find(library.find(id)).catch(() => null);
+    return tr && { key: tr.key, source: tr.source, title: tr.title, channel: tr.channel };
+  });
+  ipcMain.handle('theme:audio', async (_e, id) => themeMusic.audio(await themeMusic.find(library.find(id))));
+  ipcMain.handle('theme:candidates', (_e, term, isGame) => themeMusic.candidates(String(term || '').slice(0, 200), !!isGame));
+  ipcMain.handle('theme:trackAudio', (_e, track) => {
+    const c = themeChoice({ ...track, mode: 'track' });
+    return c ? themeMusic.audio(c, { preview: true }) : null;
+  });
+  ipcMain.handle('theme:cacheSize', () => themeMusic.cacheSize());
+  ipcMain.handle('theme:clearCache', () => themeMusic.clearCache());
+  // Every installed game's theme, ahead of time (Settings › Sound › Game Theme Music).
+  ipcMain.handle('theme:fetchAll', () => themeMusic.fetchAll(library.games.filter((g) => g.installed !== false && g.category !== 'media')));
+  ipcMain.handle('theme:fetchState', () => ({ ...themeMusic.fetch }));
+  ipcMain.handle('theme:stopFetch', () => themeMusic.stopFetch());
+  ipcMain.handle('ytdlp:state', () => ytdlp.state());
+  ipcMain.handle('ytdlp:install', async () => {
+    await ytdlp.install();
+    return ytdlp.state();
+  });
+  ipcMain.handle('ytdlp:remove', async () => {
+    await ytdlp.remove();
+    return ytdlp.state();
+  });
   ipcMain.handle('sgdb:search', (_e, term) => sgdb.search(settings.data.sgdbKey, term));
   ipcMain.handle('sgdb:list', (_e, gameId, kind, page) => sgdb.list(settings.data.sgdbKey, gameId, kind, page));
   ipcMain.handle('sgdb:apply', (_e, id, kind, artworkId) => library.setSteamGridDBArt(id, kind, artworkId));

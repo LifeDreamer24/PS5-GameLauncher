@@ -17,6 +17,7 @@ import { avatarHtml } from '../ui/avatar.js';
 import { sys, watchMedia, pollMedia, appName } from '../system.js';
 import { t } from '../i18n.js';
 import { addGameFolder } from '../ui/filebrowser.js';
+import { themeFocus } from '../thememusic.js';
 
 const BIG = 16.8;
 const SMALL = 10.6;
@@ -291,6 +292,7 @@ export class HomeView {
   updateHero() {
     if (!this.active) return;
     const it = this.items[this.sel];
+    themeFocus(it && it.type === 'game' ? it.game : null);
     if (it && it.type === 'nowplaying') {
       heroBg.set(sys.art, { blur: true });
       return;
@@ -605,6 +607,7 @@ export class HomeView {
     this.active = false;
     this.syncMediaWatch();
     heroBg.deep(false);
+    themeFocus(null);
   }
 
   /**
