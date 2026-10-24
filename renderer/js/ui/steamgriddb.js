@@ -67,7 +67,7 @@ export async function steamGridDBPicker(game) {
     });
 
     function close() { if (busyId === null && !editing) { sfx.back(); ctl.close(); } }
-    function errorText(e) { return String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+    function errorText(e) { return t(String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
     function reveal(el) {
       if (!el) return;
       const box = scroller.getBoundingClientRect(), r = el.getBoundingClientRect();
@@ -207,7 +207,7 @@ function chooseSteamGridDBGame(name) {
       list.innerHTML = '<div class="match-loading"><div class="spinner"></div></div>';
       let results = [], error = '';
       try { results = await api.sgdbSearch(term); }
-      catch (e) { error = String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+      catch (e) { error = t(String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
       if (ctl.closed || token !== generation) return;
       const rows = [
         { kind: 'search', label: 'Search for a different name…', icon: 'search' },

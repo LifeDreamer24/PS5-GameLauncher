@@ -54,7 +54,7 @@ async function chooseLauncherGpu(anchor) {
   try {
     const current = await api.getGpuPreference();
     if (!current.supported) {
-      await infoDialog({ title: 'Launcher GPU', html: 'GPU preference selection is available on Windows only.' });
+      await infoDialog({ title: 'Launcher GPU', html: escapeHtml(t('GPU preference selection is available on Windows only.')) });
       return;
     }
     const choice = await optionsMenu({
@@ -69,10 +69,11 @@ async function chooseLauncherGpu(anchor) {
     await api.setGpuPreference(choice.id);
     await infoDialog({
       title: 'GPU preference saved',
-      html: 'Fully close and reopen the launcher to apply this change. Keep Hardware Acceleration enabled to use GPU rendering. This setting applies to the launcher, not your games.',
+      html: escapeHtml(t('Fully close and reopen the launcher to apply this change. Keep Hardware Acceleration enabled to use GPU rendering. This setting applies to the launcher, not your games.')),
     });
   } catch (error) {
-    await infoDialog({ title: 'Could not change GPU preference', html: escapeHtml(error.message || String(error)) });
+    const msg = String(error.message || error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    await infoDialog({ title: 'Could not change GPU preference', html: escapeHtml(t(msg)) });
   } finally {
     gpuMenuBusy = false;
   }
