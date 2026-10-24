@@ -663,9 +663,28 @@
   height: 1.4rem;
 }
 
-.qm-music.active .qm-eq {
-  /* Leave a separate row for the active-panel dot. */
-  top: calc(50% + 3.8rem);
+/* While Music is open, the active dot joins the equaliser's row, as on Game Base. */
+.qm-eq::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 0;
+  height: 0.7rem;
+  margin-right: -0.2rem;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0;
+  transition: width 0.2s var(--ease), margin-right 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+
+.qm-music.active .qm-eq::before {
+  width: 0.7rem;
+  margin-right: 0.3rem;
+  opacity: 1;
+}
+
+.qm-music.active.playing .qm-active-dot {
+  opacity: 0;
 }
 
 .qm-music.playing .qm-eq {
@@ -1565,9 +1584,28 @@
   pointer-events: none;
 }
 
-.qm-party.active .qm-online {
-  /* Leave a separate row for the active-panel dot. */
-  top: calc(50% + 3.8rem);
+/* While Game Base is open, the active dot joins the count's row (a row of its
+   own would run off the screen under a focused button). */
+.qm-online::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 0.7rem;
+  margin-right: -0.5rem;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0;
+  transition: width 0.2s var(--ease), margin-right 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+
+.qm-party.active .qm-online::before {
+  width: 0.7rem;
+  margin-right: 0.1rem;
+  opacity: 1;
+}
+
+.qm-party.active:has(.qm-online:not(:empty)) .qm-active-dot {
+  opacity: 0;
 }
 
 .qm-online:empty {
