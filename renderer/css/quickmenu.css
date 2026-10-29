@@ -1062,8 +1062,9 @@
 }
 
 /* ---- In-game: the game stays visible behind the menu ----------------- */
+/* From the cards down as dark as the launcher's (its Home adds a fade of its own under the menu). */
 .qm.in-game .qm-shade {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.05) 0%, rgba(0, 0, 0, 0.12) 45%, rgba(0, 0, 0, 0.72) 82%, rgba(0, 0, 0, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.05) 0%, rgba(0, 0, 0, 0.15) 25%, rgba(0, 0, 0, 0.62) 50%, rgba(0, 0, 0, 0.74) 65%, rgba(0, 0, 0, 0.82) 85%, rgba(0, 0, 0, 0.86) 100%);
 }
 
 /* ---- Customize mode ------------------------------------------------- */
