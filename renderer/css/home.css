@@ -28,10 +28,19 @@
   padding: 0.6rem 2rem;
   border-radius: 1.2rem;
   letter-spacing: 0.005em;
-  /* Keep text on the same compositing layer when the animated ring appears.
-     Fractional rem sizes at 1440p otherwise expose a rasterization jump. */
-  transform: translateZ(0);
   transition: color 0.25s, box-shadow 0.25s, background 0.25s;
+}
+
+/* Isolate the glyphs from the animated ring/glint paint bounds. Promoting
+   the whole button still lets those bounds change around fractional pixels. */
+.tb-tab-label {
+  display: inline-block;
+  transform: translateZ(0);
+}
+
+.tb-icon > .ic,
+.tb-icon > .tb-avatar {
+  transform: translateZ(0);
 }
 
 .tb-tab.active {
