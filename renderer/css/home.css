@@ -31,18 +31,6 @@
   transition: color 0.25s, box-shadow 0.25s, background 0.25s;
 }
 
-/* Isolate the glyphs from the animated ring/glint paint bounds. Promoting
-   the whole button still lets those bounds change around fractional pixels. */
-.tb-tab-label {
-  display: inline-block;
-  transform: translateZ(0);
-}
-
-.tb-icon > .ic,
-.tb-icon > .tb-avatar {
-  transform: translateZ(0);
-}
-
 .tb-tab.active {
   color: #fff;
 }
@@ -67,8 +55,6 @@
   place-items: center;
   font-size: 3.4rem;
   color: #fff;
-  /* Use the same 3D transform in both states; retain the hover scale. */
-  transform: translateZ(0) scale(1);
   transition: background 0.25s, box-shadow 0.25s, transform 0.25s var(--ease);
 }
 
@@ -77,7 +63,7 @@
   background: radial-gradient(circle at 50% 30%, #ffffff 0%, #e6e7ea 55%, #c9cbd0 100%);
   color: #16181d;
   box-shadow: 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
-  transform: translateZ(0) scale(1.06);
+  transform: scale(1.06);
 }
 
 /* The profile picture keeps its own colours and gets the ring instead. */
