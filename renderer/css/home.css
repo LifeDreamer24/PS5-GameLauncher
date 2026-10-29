@@ -28,6 +28,9 @@
   padding: 0.6rem 2rem;
   border-radius: 1.2rem;
   letter-spacing: 0.005em;
+  /* Keep text on the same compositing layer when the animated ring appears.
+     Fractional rem sizes at 1440p otherwise expose a rasterization jump. */
+  transform: translateZ(0);
   transition: color 0.25s, box-shadow 0.25s, background 0.25s;
 }
 
@@ -55,6 +58,8 @@
   place-items: center;
   font-size: 3.4rem;
   color: #fff;
+  /* Use the same 3D transform in both states; retain the hover scale. */
+  transform: translateZ(0) scale(1);
   transition: background 0.25s, box-shadow 0.25s, transform 0.25s var(--ease);
 }
 
@@ -63,7 +68,7 @@
   background: radial-gradient(circle at 50% 30%, #ffffff 0%, #e6e7ea 55%, #c9cbd0 100%);
   color: #16181d;
   box-shadow: 0 0.6rem 1.8rem rgba(0, 0, 0, 0.45);
-  transform: scale(1.06);
+  transform: translateZ(0) scale(1.06);
 }
 
 /* The profile picture keeps its own colours and gets the ring instead. */
