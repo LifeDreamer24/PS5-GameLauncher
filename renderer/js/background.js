@@ -6,6 +6,11 @@ const ctx = canvas.getContext('2d', { alpha: false });
 
 let mode = 'animated';
 let visible = true;
+// While the app is dimmed (the quick menu, a dialog) it is blurred, and each
+// new frame of the background would mean blurring the whole screen again:
+// the background waits, and carries on from the same spot.
+let dimmed = false;
+let dimmedAt = 0;
 let raf = 0;
 let last = 0;
 let t0 = performance.now();
@@ -109,7 +114,7 @@ function drawFrame(now) {
 
 function step(now) {
   raf = 0;
-  if (!visible || mode !== 'animated') return;
+  if (!visible || dimmed || mode !== 'animated') return;
   const dt = Math.min(0.1, (now - last) / 1000);
   if (now - last >= 32) {
     for (const p of particles) {
@@ -124,7 +129,7 @@ function step(now) {
 }
 
 function kick() {
-  if (!raf && visible && mode === 'animated') {
+  if (!raf && visible && !dimmed && mode === 'animated') {
     last = performance.now();
     raf = requestAnimationFrame(step);
   }
@@ -134,6 +139,19 @@ export const background = {
   init() {
     resize();
     window.addEventListener('resize', resize);
+    const app = document.getElementById('app');
+    if (app) {
+      new MutationObserver(() => {
+        const d = app.classList.contains('dimmed');
+        if (d === dimmed) return;
+        dimmed = d;
+        if (d) dimmedAt = performance.now();
+        else {
+          t0 += performance.now() - dimmedAt;
+          kick();
+        }
+      }).observe(app, { attributes: true, attributeFilter: ['class'] });
+    }
     kick();
   },
   setMode(m) {

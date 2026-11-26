@@ -145,6 +145,15 @@ svg.ic {
   filter: brightness(0.42) blur(0.5rem) saturate(1.1);
 }
 
+/* Behind the quick menu or a dialog the app is blurred, so each change in it
+   means blurring the whole screen again, and redrawing what lies under it (a
+   library cover, its picture and shadow). The focus ring's swing and the
+   shine, which change every frame, wait there until the app is back. */
+#app.dimmed .fx::before,
+#app.dimmed .fx::after {
+  animation-play-state: paused;
+}
+
 /* Starting a game (see .launch-overlay): the page's buttons and text fade out
    while its background stays, as on the PS5. */
 #app.launching #views {
